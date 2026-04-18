@@ -5,10 +5,18 @@ import { Article } from "@/lib/types";
 type ArticleListProps = {
   articles: Article[];
   activeTags: string[];
+  personalizedView: boolean;
+  scoreLookup?: Map<string, number>;
   onTagClick: (tag: string) => void;
 };
 
-export function ArticleList({ articles, activeTags, onTagClick }: ArticleListProps) {
+export function ArticleList({
+  articles,
+  activeTags,
+  personalizedView,
+  scoreLookup,
+  onTagClick,
+}: ArticleListProps) {
   return (
     <section className="rounded-[2rem] border border-line bg-white p-6 shadow-panel">
       <div className="mb-4 flex items-center justify-between gap-4">
@@ -39,7 +47,9 @@ export function ArticleList({ articles, activeTags, onTagClick }: ArticleListPro
                   <p className="mt-2 text-sm leading-6 text-slate-600">{article.summary}</p>
                 </div>
                 <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-accent">
-                  {article.importance}/5
+                  {personalizedView
+                    ? `${(scoreLookup?.get(article.id) ?? article.importance).toFixed(1)}`
+                    : `${article.importance}/5`}
                 </span>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">

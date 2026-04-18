@@ -5,10 +5,18 @@ import { Article } from "@/lib/types";
 type TopSignalsProps = {
   articles: Article[];
   activeTags: string[];
+  personalizedView: boolean;
+  scoreLookup?: Map<string, number>;
   onTagClick: (tag: string) => void;
 };
 
-export function TopSignals({ articles, activeTags, onTagClick }: TopSignalsProps) {
+export function TopSignals({
+  articles,
+  activeTags,
+  personalizedView,
+  scoreLookup,
+  onTagClick,
+}: TopSignalsProps) {
   return (
     <section className="rounded-[2rem] border border-line bg-white p-6 shadow-panel">
       <div className="mb-4 flex items-center justify-between gap-4">
@@ -18,7 +26,9 @@ export function TopSignals({ articles, activeTags, onTagClick }: TopSignalsProps
           </p>
           <h2 className="mt-1 text-2xl font-semibold text-ink">Top Signals</h2>
         </div>
-        <span className="text-sm text-slate-500">Top 5 by importance</span>
+        <span className="text-sm text-slate-500">
+          {personalizedView ? "Top 5 by personal score" : "Top 5 by importance"}
+        </span>
       </div>
 
       {articles.length ? (
@@ -37,7 +47,9 @@ export function TopSignals({ articles, activeTags, onTagClick }: TopSignalsProps
                   <h3 className="mt-2 text-lg font-semibold text-ink">{article.headline}</h3>
                 </div>
                 <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-accent">
-                  {article.importance}/5
+                  {personalizedView
+                    ? `${(scoreLookup?.get(article.id) ?? article.importance).toFixed(1)}`
+                    : `${article.importance}/5`}
                 </span>
               </div>
               <p className="mt-3 text-sm leading-6 text-slate-600">{article.summary}</p>

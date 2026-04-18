@@ -18,6 +18,7 @@ type TrendsPanelProps = {
   emerging: DeltaTrend[];
   longTerm: RisingTrend[];
   activeTags: string[];
+  personalizedView: boolean;
   onTrendClick: (tag: string) => void;
 };
 
@@ -46,6 +47,7 @@ export function TrendsPanel({
   emerging,
   longTerm,
   activeTags,
+  personalizedView,
   onTrendClick,
 }: TrendsPanelProps) {
   return (
@@ -58,7 +60,9 @@ export function TrendsPanel({
             </p>
             <h2 className="mt-1 text-2xl font-semibold text-ink">Emerging Trends</h2>
           </div>
-          <span className="text-sm text-slate-500">Highest positive delta</span>
+          <span className="text-sm text-slate-500">
+            {personalizedView ? "Priority adjusted by profile" : "Highest positive delta"}
+          </span>
         </div>
 
         {emerging.length ? (
@@ -106,7 +110,9 @@ export function TrendsPanel({
             </p>
             <h2 className="mt-1 text-2xl font-semibold text-ink">Long-Term Trends</h2>
           </div>
-          <span className="text-sm text-slate-500">Top rising tags</span>
+          <span className="text-sm text-slate-500">
+            {personalizedView ? "Priority adjusted by profile" : "Top rising tags"}
+          </span>
         </div>
 
         {longTerm.length ? (

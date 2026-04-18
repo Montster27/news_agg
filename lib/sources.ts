@@ -63,6 +63,11 @@ export const sources: RssSource[] = [
     category: "Macro",
   },
   {
+    name: "Techmeme",
+    url: "https://www.techmeme.com/feed.xml",
+    category: "Macro",
+  },
+  {
     name: "Reuters Tech",
     url: "https://www.reutersagency.com/feed/?best-topics=technology",
     category: "Macro",
