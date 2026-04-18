@@ -3,8 +3,9 @@ import "server-only";
 import OpenAI from "openai";
 import { Article, ArticleDomain } from "@/lib/types";
 
-const AI_MODEL = "gpt-5.4-mini";
+const AI_MODEL = "gpt-4o-mini";
 const ONE_HOUR = 60 * 60 * 1000;
+const AI_FAILURE_COOLDOWN = 15 * 60 * 1000;
 const GENERIC_TAGS = new Set(["ai", "technology", "startup", "news", "tech"]);
 const VALID_DOMAINS: ArticleDomain[] = [
   "AI",
@@ -30,10 +31,15 @@ type CacheEntry = {
 };
 
 const processedCache = new Map<string, CacheEntry>();
+let aiDisabledUntil = 0;
 
 const client =
   process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== "your_key_here"
-    ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+    ? new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+        maxRetries: 0,
+        timeout: 2500,
+      })
     : null;
 
 const systemPrompt = `You are a technology analyst.
@@ -119,10 +125,6 @@ function fallbackArticle(article: ArticleInput): ProcessedArticle {
   };
 }
 
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export async function processArticle(article: ArticleInput): Promise<ProcessedArticle> {
   const key = cacheKey(article);
   const cached = processedCache.get(key);
@@ -137,23 +139,34 @@ export async function processArticle(article: ArticleInput): Promise<ProcessedAr
     return fallback;
   }
 
+  if (Date.now() < aiDisabledUntil) {
+    const fallback = fallbackArticle(article);
+    processedCache.set(key, { value: fallback, expiresAt: Date.now() + ONE_HOUR });
+    return fallback;
+  }
+
   try {
-    const response = await client.responses.create({
+    const response = await client.chat.completions.create({
       model: AI_MODEL,
-      instructions: systemPrompt,
-      input: `Article:\nHeadline: ${article.headline}\nSource: ${article.source ?? "Unknown"}\nSummary: ${article.summary}\n\nReturn JSON only.`,
-      text: {
-        format: {
-          type: "json_schema",
+      messages: [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: `Article:\nHeadline: ${article.headline}\nSource: ${article.source ?? "Unknown"}\nSummary: ${article.summary}\n\nReturn JSON only.`,
+        },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
           name: "article_intelligence",
           strict: true,
           schema: responseSchema,
         },
       },
-      max_output_tokens: 220,
+      max_tokens: 220,
     });
 
-    const parsed = JSON.parse(response.output_text || "{}") as {
+    const parsed = JSON.parse(response.choices[0].message.content || "{}") as {
       summary?: string;
       domain?: string;
       tags?: string[];
@@ -184,6 +197,14 @@ export async function processArticle(article: ArticleInput): Promise<ProcessedAr
     const message = error instanceof Error ? error.message : "Unknown AI error";
     console.error(`[ai] processArticle failed: ${message}`);
 
+    if (
+      message.includes("429") ||
+      message.includes("401") ||
+      message.toLowerCase().includes("quota")
+    ) {
+      aiDisabledUntil = Date.now() + AI_FAILURE_COOLDOWN;
+    }
+
     const fallback = fallbackArticle(article);
     processedCache.set(key, { value: fallback, expiresAt: Date.now() + ONE_HOUR });
     return fallback;
@@ -191,11 +212,11 @@ export async function processArticle(article: ArticleInput): Promise<ProcessedAr
 }
 
 export async function processArticlesInBatches(articles: Article[]) {
-  const limit = Math.min(articles.length, 12);
+  const limit = Math.min(articles.length, 6);
   const processed = [...articles];
 
-  for (let index = 0; index < limit; index += 4) {
-    const slice = processed.slice(index, index + 4);
+  for (let index = 0; index < limit; index += 3) {
+    const slice = processed.slice(index, index + 3);
     const enriched = await Promise.all(
       slice.map(async (article) => {
         const aiResult = await processArticle(article);
@@ -213,10 +234,6 @@ export async function processArticlesInBatches(articles: Article[]) {
     );
 
     processed.splice(index, enriched.length, ...enriched);
-
-    if (index + 4 < limit) {
-      await delay(250);
-    }
   }
 
   return processed;
