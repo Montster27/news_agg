@@ -11,6 +11,8 @@ export type ArticleDomain =
 export type Article = {
   id: string;
   date: string;
+  processed_at: string;
+  week: string;
   domain: ArticleDomain;
   headline: string;
   summary: string;
