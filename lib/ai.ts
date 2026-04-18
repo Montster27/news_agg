@@ -169,10 +169,9 @@ export async function processArticle(article: ArticleInput): Promise<ProcessedAr
 }
 
 export async function processArticlesInBatches(articles: Article[]) {
-  const limit = Math.min(articles.length, 6);
   const processed = [...articles];
 
-  for (let index = 0; index < limit; index += 6) {
+  for (let index = 0; index < processed.length; index += 6) {
     const slice = processed.slice(index, index + 6);
     
     const uncached = slice.filter((article) => {
