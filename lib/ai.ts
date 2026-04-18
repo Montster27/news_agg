@@ -1,9 +1,8 @@
 import "server-only";
 
-import OpenAI from "openai";
+import { AI_ARTICLE_MODEL, getOpenAIClient } from "@/lib/ai-client";
 import { Article, ArticleDomain } from "@/lib/types";
 
-const AI_MODEL = "gpt-4o-mini";
 const ONE_HOUR = 60 * 60 * 1000;
 const AI_FAILURE_COOLDOWN = 15 * 60 * 1000;
 const GENERIC_TAGS = new Set(["ai", "technology", "startup", "news", "tech"]);
@@ -33,14 +32,7 @@ type CacheEntry = {
 const processedCache = new Map<string, CacheEntry>();
 let aiDisabledUntil = 0;
 
-const client =
-  process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== "your_key_here"
-    ? new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
-        maxRetries: 2,
-        timeout: 30000,
-      })
-    : null;
+const client = getOpenAIClient();
 
 const systemPrompt = `You are a technology analyst.
 
@@ -189,8 +181,8 @@ export async function processArticlesInBatches(articles: Article[]) {
       } else {
         try {
           const promptInput = JSON.stringify(
-            uncached.map((a) => ({
-              id: a.id,
+            uncached.map((a, idx) => ({
+              id: String(idx),
               headline: a.headline,
               summary: a.summary,
               source: a.source ?? "Unknown",
@@ -198,7 +190,7 @@ export async function processArticlesInBatches(articles: Article[]) {
           );
 
           const response = await client.chat.completions.create({
-            model: AI_MODEL,
+            model: AI_ARTICLE_MODEL,
             messages: [
               { role: "system", content: systemPrompt },
               {
@@ -228,10 +220,17 @@ export async function processArticlesInBatches(articles: Article[]) {
           };
 
           const aiResults = parsed.articles || [];
+          const aiByIndex = new Map<string, (typeof aiResults)[number]>();
+          for (const item of aiResults) {
+            if (item && typeof item.id === "string") {
+              aiByIndex.set(item.id, item);
+            }
+          }
 
-          for (const article of uncached) {
+          for (let i = 0; i < uncached.length; i++) {
+            const article = uncached[i];
             const key = cacheKey(article);
-            const aiItem = aiResults.find((r) => r.id === article.id);
+            const aiItem = aiByIndex.get(String(i)) ?? aiResults[i];
 
             let processedArticle: ProcessedArticle;
 

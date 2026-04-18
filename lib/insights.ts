@@ -1,11 +1,10 @@
 import "server-only";
 
-import OpenAI from "openai";
+import { AI_INSIGHT_MODEL, getOpenAIClient } from "@/lib/ai-client";
 import { saveInsightsToDb } from "@/lib/db";
 import type { PatternAnalysis, TagCorrelation } from "@/lib/patterns";
 import type { Article, ArticleDomain } from "@/lib/types";
 
-const INSIGHT_MODEL = "gpt-5.4-mini";
 const ONE_HOUR = 60 * 60 * 1000;
 
 export type DetectedInflection = {
@@ -41,14 +40,7 @@ type InsightCacheEntry = {
   value: InsightEngineResult;
 };
 
-const client =
-  process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== "your_key_here"
-    ? new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
-        maxRetries: 0,
-        timeout: 8000,
-      })
-    : null;
+const client = getOpenAIClient();
 
 const insightCache = new Map<string, InsightCacheEntry>();
 
@@ -278,10 +270,7 @@ export async function generateInsightReport(params: {
   }
 
   try {
-    const response = await client.responses.create({
-      model: INSIGHT_MODEL,
-      instructions: systemPrompt,
-      input: `Signals:
+    const userPrompt = `Signals:
 ${JSON.stringify(
   {
     inflections,
@@ -295,19 +284,26 @@ ${JSON.stringify(
   2,
 )}
 
-Return JSON only.`,
-      text: {
-        format: {
-          type: "json_schema",
+Return JSON only.`;
+
+    const response = await client.chat.completions.create({
+      model: AI_INSIGHT_MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
           name: "insight_report",
           strict: true,
           schema: insightSchema,
         },
       },
-      max_output_tokens: 500,
+      max_tokens: 800,
     });
 
-    const parsed = JSON.parse(response.output_text || "{}") as { insights?: InsightItem[] };
+    const parsed = JSON.parse(response.choices[0].message.content || "{}") as { insights?: InsightItem[] };
     const result = {
       insights: sanitizeInsights(parsed.insights, fallback),
       inflections,

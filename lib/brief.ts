@@ -1,12 +1,11 @@
 import "server-only";
 
-import OpenAI from "openai";
+import { AI_BRIEF_MODEL, getOpenAIClient } from "@/lib/ai-client";
 import { saveBriefToDb } from "@/lib/db";
 import { PatternAnalysis } from "@/lib/patterns";
 import { getStoredBrief, setStoredBrief } from "@/lib/store";
 import { Article } from "@/lib/types";
 
-const BRIEF_MODEL = "gpt-5.4-mini";
 const ONE_DAY = 24 * 60 * 60 * 1000;
 
 export type WeeklyBrief = {
@@ -18,14 +17,7 @@ export type WeeklyBrief = {
   used_fallback: boolean;
 };
 
-const client =
-  process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== "your_key_here"
-    ? new OpenAI({
-        apiKey: process.env.OPENAI_API_KEY,
-        maxRetries: 0,
-        timeout: 8000,
-      })
-    : null;
+const client = getOpenAIClient();
 
 const systemPrompt = `You are a senior technology analyst.
 
@@ -169,16 +161,7 @@ export async function generateWeeklyBrief(
   }
 
   try {
-    const response = await client.responses.create({
-      model: BRIEF_MODEL,
-      instructions: systemPrompt,
-      input: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: `Provide:
+    const userPrompt = `Provide:
 - top tags
 - trending tags
 - correlations
@@ -199,23 +182,26 @@ ${JSON.stringify(
 Sample articles:
 ${JSON.stringify(sampledArticles, null, 2)}
 
-Return JSON only.`,
-            },
-          ],
-        },
+Return JSON only.`;
+
+    const response = await client.chat.completions.create({
+      model: AI_BRIEF_MODEL,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
       ],
-      text: {
-        format: {
-          type: "json_schema",
+      response_format: {
+        type: "json_schema",
+        json_schema: {
           name: "weekly_brief",
           strict: true,
           schema: briefSchema,
         },
       },
-      max_output_tokens: 500,
+      max_tokens: 800,
     });
 
-    const parsed = JSON.parse(response.output_text || "{}") as Partial<WeeklyBrief>;
+    const parsed = JSON.parse(response.choices[0].message.content || "{}") as Partial<WeeklyBrief>;
     const brief: WeeklyBrief = {
       top_shifts: normalizeBullets(parsed.top_shifts, fallbackBrief(patterns).top_shifts),
       emerging_patterns: normalizeBullets(
