@@ -1,10 +1,11 @@
+import { processArticlesInBatches } from "@/lib/ai";
 import Parser from "rss-parser";
 import { fallbackArticles } from "@/lib/data";
 import { sources, type RssSource } from "@/lib/sources";
 import { Article } from "@/lib/types";
 
 const parser = new Parser();
-const TEN_MINUTES = 10 * 60 * 1000;
+const ONE_HOUR = 60 * 60 * 1000;
 const MAX_ARTICLES_PER_SOURCE = 5;
 const MAX_DASHBOARD_ARTICLES = 30;
 
@@ -55,6 +56,8 @@ function normalizeItem(source: RssSource, item: Parser.Item): Article | null {
     url,
     date,
     domain: source.category,
+    tags: ["uncategorized"],
+    importance: 3,
   };
 }
 
@@ -114,7 +117,7 @@ function dedupeArticles(articles: Article[]) {
 export async function ingestFeeds() {
   if (
     articleCache &&
-    Date.now() - new Date(articleCache.fetchedAt).getTime() < TEN_MINUTES
+    Date.now() - new Date(articleCache.fetchedAt).getTime() < ONE_HOUR
   ) {
     return articleCache;
   }
@@ -126,8 +129,10 @@ export async function ingestFeeds() {
     })
     .slice(0, MAX_DASHBOARD_ARTICLES);
 
+  const enriched = await processArticlesInBatches(deduped);
+
   const nextCache = {
-    articles: deduped.length ? deduped : fallbackArticles,
+    articles: enriched.length ? enriched : fallbackArticles,
     fetchedAt: new Date().toISOString(),
   };
 

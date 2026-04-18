@@ -16,6 +16,6 @@ export type Article = {
   summary: string;
   source?: string;
   url?: string;
-  tags?: string[];
-  importance?: 1 | 2 | 3 | 4 | 5;
+  tags: string[];
+  importance: 1 | 2 | 3 | 4 | 5;
 };

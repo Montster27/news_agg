@@ -16,6 +16,7 @@ export function DashboardClient() {
   const [fetchedAt, setFetchedAt] = useState<string>("");
   const [activeSource, setActiveSource] = useState<string>("All sources");
   const [activeCategory, setActiveCategory] = useState<string>("All categories");
+  const [activeTags, setActiveTags] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,19 +71,55 @@ export function DashboardClient() {
     [articles],
   );
 
+  const availableTags = useMemo(
+    () =>
+      Array.from(
+        new Set(articles.flatMap((article) => article.tags)),
+      ).sort(),
+    [articles],
+  );
+
   const filteredArticles = useMemo(() => {
     return articles.filter((article) => {
       const sourceMatches =
         activeSource === "All sources" || article.source === activeSource;
       const categoryMatches =
         activeCategory === "All categories" || article.domain === activeCategory;
+      const tagMatches =
+        activeTags.length === 0 ||
+        activeTags.every((tag) => article.tags.includes(tag));
 
-      return sourceMatches && categoryMatches;
+      return sourceMatches && categoryMatches && tagMatches;
     });
-  }, [activeCategory, activeSource, articles]);
+  }, [activeCategory, activeSource, activeTags, articles]);
 
   const latestArticles = filteredArticles.slice(0, 24);
-  const topSignals = latestArticles.slice(0, 5);
+  const topSignals = [...latestArticles]
+    .sort((left, right) => right.importance - left.importance)
+    .slice(0, 5);
+
+  const relatedArticles = useMemo(() => {
+    if (!activeTags.length) {
+      return [];
+    }
+
+    return articles
+      .filter((article) => activeTags.some((tag) => article.tags.includes(tag)))
+      .sort((left, right) => {
+        const leftMatches = activeTags.filter((tag) => left.tags.includes(tag)).length;
+        const rightMatches = activeTags.filter((tag) => right.tags.includes(tag)).length;
+        return rightMatches - leftMatches || right.importance - left.importance;
+      })
+      .slice(0, 6);
+  }, [activeTags, articles]);
+
+  const toggleTag = (tag: string) => {
+    setActiveTags((current) =>
+      current.includes(tag)
+        ? current.filter((activeTag) => activeTag !== tag)
+        : [...current, tag],
+    );
+  };
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-10">
@@ -148,6 +185,31 @@ export function DashboardClient() {
             {fetchedAt ? `Updated ${new Date(fetchedAt).toLocaleString()}` : null}
           </div>
         </div>
+        <div className="mt-5 flex flex-wrap gap-2">
+          {availableTags.map((tag) => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => toggleTag(tag)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+                activeTags.includes(tag)
+                  ? "border-accent bg-accent text-white"
+                  : "border-line bg-white text-slate-600 hover:border-accent hover:text-accent"
+              }`}
+            >
+              #{tag}
+            </button>
+          ))}
+        </div>
+        {activeTags.length ? (
+          <button
+            type="button"
+            onClick={() => setActiveTags([])}
+            className="mt-4 text-sm font-medium text-accent"
+          >
+            Clear tags
+          </button>
+        ) : null}
       </section>
 
       {loading ? (
@@ -177,10 +239,33 @@ export function DashboardClient() {
                   key={article.id}
                   article={article}
                   isHighlighted={true}
+                  activeTags={activeTags}
+                  onTagClick={toggleTag}
                 />
               ))}
             </div>
           </section>
+
+          {activeTags.length ? (
+            <section className="mt-10">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-2xl font-semibold text-ink">Related by Tag</h2>
+                <span className="text-sm text-slate-500">
+                  {activeTags.join(", ")}
+                </span>
+              </div>
+              <div className="grid gap-4 lg:grid-cols-2">
+                {relatedArticles.map((article) => (
+                  <ArticleCard
+                    key={`related-${article.id}`}
+                    article={article}
+                    activeTags={activeTags}
+                    onTagClick={toggleTag}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           <section className="mt-10 space-y-8">
             {dashboardGroups.map((group) => {
@@ -199,7 +284,12 @@ export function DashboardClient() {
                   {groupArticles.length ? (
                     <div className="grid gap-4 lg:grid-cols-2">
                       {groupArticles.map((article) => (
-                        <ArticleCard key={article.id} article={article} />
+                        <ArticleCard
+                          key={article.id}
+                          article={article}
+                          activeTags={activeTags}
+                          onTagClick={toggleTag}
+                        />
                       ))}
                     </div>
                   ) : (
