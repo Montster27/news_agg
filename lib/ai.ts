@@ -204,7 +204,7 @@ export async function processArticlesInBatches(articles: Article[]) {
               { role: "system", content: systemPrompt },
               {
                 role: "user",
-                content: \`Articles to analyze:\n\${promptInput}\n\nReturn JSON only.\`,
+                content: `Articles to analyze:\n${promptInput}\n\nReturn JSON only.`,
               },
             ],
             response_format: {
@@ -258,7 +258,7 @@ export async function processArticlesInBatches(articles: Article[]) {
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unknown AI error";
-          console.error(\`[ai] processArticlesInBatches failed: \${message}\`);
+          console.error(`[ai] processArticlesInBatches failed: ${message}`);
 
           if (
             message.includes("429") ||
