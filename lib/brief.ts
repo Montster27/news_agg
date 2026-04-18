@@ -1,6 +1,7 @@
 import "server-only";
 
 import OpenAI from "openai";
+import { saveBriefToDb } from "@/lib/db";
 import { PatternAnalysis } from "@/lib/patterns";
 import { getStoredBrief, setStoredBrief } from "@/lib/store";
 import { Article } from "@/lib/types";
@@ -125,6 +126,10 @@ function buildStoreKey(articles: Article[], patterns: PatternAnalysis) {
   });
 }
 
+function currentWeekFromArticles(articles: Article[]) {
+  return articles[0]?.week ?? new Date().toISOString().slice(0, 7);
+}
+
 export async function generateWeeklyBrief(
   articles: Article[],
   patterns: PatternAnalysis,
@@ -155,6 +160,7 @@ export async function generateWeeklyBrief(
   if (!client) {
     const fallback = fallbackBrief(patterns);
     setStoredBrief(storeKey, fallback, ONE_DAY);
+    await saveBriefToDb(currentWeekFromArticles(sortedArticles), fallback);
     return fallback;
   }
 
@@ -225,12 +231,14 @@ Return JSON only.`,
     };
 
     setStoredBrief(storeKey, brief, ONE_DAY);
+    await saveBriefToDb(currentWeekFromArticles(sortedArticles), brief);
     return brief;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown brief generation error";
     console.error(`[brief] generateWeeklyBrief failed: ${message}`);
     const fallback = fallbackBrief(patterns);
     setStoredBrief(storeKey, fallback, ONE_DAY);
+    await saveBriefToDb(currentWeekFromArticles(sortedArticles), fallback);
     return fallback;
   }
 }

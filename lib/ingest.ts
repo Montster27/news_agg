@@ -1,4 +1,5 @@
 import { processArticlesInBatches } from "@/lib/ai";
+import { saveArticlesToDb } from "@/lib/db";
 import Parser from "rss-parser";
 import { fallbackArticles } from "@/lib/data";
 import { sources, type RssSource } from "@/lib/sources";
@@ -147,6 +148,7 @@ export async function ingestFeeds() {
     fetchedAt: new Date().toISOString(),
   };
 
+  await saveArticlesToDb(nextCache.articles);
   articleCache = nextCache;
   return nextCache;
 }

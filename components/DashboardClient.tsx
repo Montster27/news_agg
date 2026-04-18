@@ -152,6 +152,12 @@ export function DashboardClient() {
           >
             Weekly Brief
           </Link>
+          <Link
+            href="/trends"
+            className="inline-flex items-center justify-center rounded-full border border-line bg-white px-5 py-3 text-sm font-semibold text-ink transition hover:border-accent hover:text-accent"
+          >
+            Long-Term Trends
+          </Link>
         </div>
       </header>
 

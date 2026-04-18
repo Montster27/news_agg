@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { generateWeeklyBrief } from "@/lib/brief";
 import { ingestFeeds } from "@/lib/ingest";
-import { analyzePatterns } from "@/lib/patterns";
+import { analyzePatternsWithPersistence } from "@/lib/patterns";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +39,10 @@ export default async function BriefPage({
     const ageMs = Date.now() - new Date(article.date).getTime();
     return ageMs <= 7 * 24 * 60 * 60 * 1000;
   });
-  const patterns = analyzePatterns(recentArticles.length ? recentArticles : articles, "All");
+  const patterns = await analyzePatternsWithPersistence(
+    recentArticles.length ? recentArticles : articles,
+    "All",
+  );
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const forceRefresh = resolvedSearchParams?.refresh === "1";
   const brief = await generateWeeklyBrief(
@@ -72,6 +75,12 @@ export default async function BriefPage({
               className="inline-flex items-center justify-center rounded-full border border-line bg-white px-5 py-3 text-sm font-semibold text-ink transition hover:border-accent hover:text-accent"
             >
               Back to Dashboard
+            </Link>
+            <Link
+              href="/trends"
+              className="inline-flex items-center justify-center rounded-full border border-line bg-white px-5 py-3 text-sm font-semibold text-ink transition hover:border-accent hover:text-accent"
+            >
+              Long-Term Trends
             </Link>
           </div>
         </div>

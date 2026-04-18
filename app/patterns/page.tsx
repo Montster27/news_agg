@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ingestFeeds } from "@/lib/ingest";
-import { analyzePatterns } from "@/lib/patterns";
+import { analyzePatternsWithPersistence } from "@/lib/patterns";
 import { ArticleDomain } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -47,7 +47,7 @@ export default async function PatternsPage({
   )
     ? ((resolvedSearchParams?.domain as ArticleDomain | "All") ?? "All")
     : "All";
-  const analysis = analyzePatterns(articles, selectedDomain);
+  const analysis = await analyzePatternsWithPersistence(articles, selectedDomain);
   const maxTagCount = analysis.topTags[0]?.count ?? 1;
   const maxCorrelationCount = analysis.correlations[0]?.count ?? 1;
 
@@ -74,6 +74,12 @@ export default async function PatternsPage({
             className="inline-flex items-center justify-center rounded-full border border-line bg-white px-5 py-3 text-sm font-semibold text-ink transition hover:border-accent hover:text-accent"
           >
             Weekly Brief
+          </Link>
+          <Link
+            href="/trends"
+            className="inline-flex items-center justify-center rounded-full border border-line bg-white px-5 py-3 text-sm font-semibold text-ink transition hover:border-accent hover:text-accent"
+          >
+            Long-Term Trends
           </Link>
         </div>
 

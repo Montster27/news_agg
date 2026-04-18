@@ -1,4 +1,5 @@
 import { Article, ArticleDomain } from "@/lib/types";
+import { savePatternSnapshot } from "@/lib/db";
 
 const ONE_HOUR = 60 * 60 * 1000;
 const CURRENT_WINDOW_DAYS = 7;
@@ -226,5 +227,14 @@ export function analyzePatterns(
     expiresAt: Date.now() + ONE_HOUR,
   });
 
+  return analysis;
+}
+
+export async function analyzePatternsWithPersistence(
+  articles: Article[],
+  domain: ArticleDomain | "All" = "All",
+) {
+  const analysis = analyzePatterns(articles, domain);
+  await savePatternSnapshot(analysis);
   return analysis;
 }
