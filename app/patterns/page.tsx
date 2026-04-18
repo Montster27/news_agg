@@ -69,6 +69,12 @@ export default async function PatternsPage({
           >
             Back to Dashboard
           </Link>
+          <Link
+            href="/brief"
+            className="inline-flex items-center justify-center rounded-full border border-line bg-white px-5 py-3 text-sm font-semibold text-ink transition hover:border-accent hover:text-accent"
+          >
+            Weekly Brief
+          </Link>
         </div>
 
         <section className="mt-8 rounded-2xl border border-line bg-mist p-5">
