@@ -16,7 +16,7 @@ const VALID_DOMAINS: ArticleDomain[] = [
   "Macro",
 ];
 
-type ArticleInput = Pick<Article, "headline" | "summary" | "source">;
+type ArticleInput = Pick<Article, "id" | "headline" | "summary" | "source">;
 
 type ProcessedArticle = {
   clean_summary: string;
@@ -54,27 +54,40 @@ Be precise and consistent.`;
 const responseSchema = {
   type: "object",
   properties: {
-    summary: {
-      type: "string",
-      description: "A clear two-sentence summary.",
-    },
-    domain: {
-      type: "string",
-      enum: VALID_DOMAINS,
-    },
-    tags: {
+    articles: {
       type: "array",
-      items: { type: "string" },
-      minItems: 1,
-      maxItems: 4,
-    },
-    importance: {
-      type: "integer",
-      minimum: 1,
-      maximum: 5,
+      items: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+          },
+          summary: {
+            type: "string",
+            description: "A clear two-sentence summary.",
+          },
+          domain: {
+            type: "string",
+            enum: VALID_DOMAINS,
+          },
+          tags: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 1,
+            maxItems: 4,
+          },
+          importance: {
+            type: "integer",
+            minimum: 1,
+            maximum: 5,
+          },
+        },
+        required: ["id", "summary", "domain", "tags", "importance"],
+        additionalProperties: false,
+      },
     },
   },
-  required: ["summary", "domain", "tags", "importance"],
+  required: ["articles"],
   additionalProperties: false,
 } as const;
 
@@ -133,107 +146,149 @@ export async function processArticle(article: ArticleInput): Promise<ProcessedAr
     return cached.value;
   }
 
-  if (!client) {
-    const fallback = fallbackArticle(article);
-    processedCache.set(key, { value: fallback, expiresAt: Date.now() + ONE_HOUR });
-    return fallback;
-  }
+  const dummyArticle = {
+    ...article,
+    id: article.id ?? cacheKey(article),
+    date: new Date().toISOString(),
+    processed_at: new Date().toISOString(),
+    week: "now",
+    domain: "Macro" as ArticleDomain,
+    tags: [],
+    importance: 3,
+  } as Article;
 
-  if (Date.now() < aiDisabledUntil) {
-    const fallback = fallbackArticle(article);
-    processedCache.set(key, { value: fallback, expiresAt: Date.now() + ONE_HOUR });
-    return fallback;
-  }
+  const results = await processArticlesInBatches([dummyArticle]);
+  const processedResult: ProcessedArticle = {
+    clean_summary: results[0].summary,
+    domain: results[0].domain as Extract<ArticleDomain, "AI" | "Chips" | "Infra" | "Bio" | "Energy" | "Macro">,
+    tags: results[0].tags,
+    importance: results[0].importance as 1 | 2 | 3 | 4 | 5,
+  };
 
-  try {
-    const response = await client.chat.completions.create({
-      model: AI_MODEL,
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: `Article:\nHeadline: ${article.headline}\nSource: ${article.source ?? "Unknown"}\nSummary: ${article.summary}\n\nReturn JSON only.`,
-        },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "article_intelligence",
-          strict: true,
-          schema: responseSchema,
-        },
-      },
-      max_tokens: 220,
-    });
-
-    const parsed = JSON.parse(response.choices[0].message.content || "{}") as {
-      summary?: string;
-      domain?: string;
-      tags?: string[];
-      importance?: number;
-    };
-
-    const processed: ProcessedArticle = {
-      clean_summary: sentenceClamp(parsed.summary ?? article.summary),
-      domain: VALID_DOMAINS.includes((parsed.domain ?? "Macro") as ArticleDomain)
-        ? ((parsed.domain ?? "Macro") as ProcessedArticle["domain"])
-        : "Macro",
-      tags: normalizeTags(Array.isArray(parsed.tags) ? parsed.tags : []),
-      importance:
-        typeof parsed.importance === "number" &&
-        parsed.importance >= 1 &&
-        parsed.importance <= 5
-          ? (parsed.importance as ProcessedArticle["importance"])
-          : 3,
-    };
-
-    processedCache.set(key, {
-      value: processed,
-      expiresAt: Date.now() + ONE_HOUR,
-    });
-
-    return processed;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown AI error";
-    console.error(`[ai] processArticle failed: ${message}`);
-
-    if (
-      message.includes("429") ||
-      message.includes("401") ||
-      message.toLowerCase().includes("quota")
-    ) {
-      aiDisabledUntil = Date.now() + AI_FAILURE_COOLDOWN;
-    }
-
-    const fallback = fallbackArticle(article);
-    processedCache.set(key, { value: fallback, expiresAt: Date.now() + ONE_HOUR });
-    return fallback;
-  }
+  return processedResult;
 }
 
 export async function processArticlesInBatches(articles: Article[]) {
   const limit = Math.min(articles.length, 6);
   const processed = [...articles];
 
-  for (let index = 0; index < limit; index += 3) {
-    const slice = processed.slice(index, index + 3);
-    const enriched = await Promise.all(
-      slice.map(async (article) => {
-        const aiResult = await processArticle(article);
+  for (let index = 0; index < limit; index += 6) {
+    const slice = processed.slice(index, index + 6);
+    
+    const uncached = slice.filter((article) => {
+      const key = cacheKey(article);
+      const cached = processedCache.get(key);
+      return !(cached && cached.expiresAt > Date.now());
+    });
 
-        return {
-          ...article,
-          processed_at: article.processed_at,
-          week: article.week,
-          summary: aiResult.clean_summary,
-          domain: aiResult.domain,
-          tags: aiResult.tags,
-          importance: aiResult.importance,
-        };
-      }),
-    );
+    if (uncached.length > 0) {
+      if (!client || Date.now() < aiDisabledUntil) {
+        for (const article of uncached) {
+          const key = cacheKey(article);
+          processedCache.set(key, { value: fallbackArticle(article), expiresAt: Date.now() + ONE_HOUR });
+        }
+      } else {
+        try {
+          const promptInput = JSON.stringify(
+            uncached.map((a) => ({
+              id: a.id,
+              headline: a.headline,
+              summary: a.summary,
+              source: a.source ?? "Unknown",
+            }))
+          );
 
-    processed.splice(index, enriched.length, ...enriched);
+          const response = await client.chat.completions.create({
+            model: AI_MODEL,
+            messages: [
+              { role: "system", content: systemPrompt },
+              {
+                role: "user",
+                content: \`Articles to analyze:\n\${promptInput}\n\nReturn JSON only.\`,
+              },
+            ],
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "article_intelligence",
+                strict: true,
+                schema: responseSchema,
+              },
+            },
+            max_tokens: 1500,
+          });
+
+          const parsed = JSON.parse(response.choices[0].message.content || "{}") as {
+            articles?: Array<{
+              id: string;
+              summary?: string;
+              domain?: string;
+              tags?: string[];
+              importance?: number;
+            }>;
+          };
+
+          const aiResults = parsed.articles || [];
+
+          for (const article of uncached) {
+            const key = cacheKey(article);
+            const aiItem = aiResults.find((r) => r.id === article.id);
+
+            let processedArticle: ProcessedArticle;
+
+            if (aiItem) {
+              processedArticle = {
+                clean_summary: sentenceClamp(aiItem.summary ?? article.summary),
+                domain: VALID_DOMAINS.includes((aiItem.domain ?? "Macro") as ArticleDomain)
+                  ? (aiItem.domain as ProcessedArticle["domain"])
+                  : "Macro",
+                tags: normalizeTags(Array.isArray(aiItem.tags) ? aiItem.tags : []),
+                importance:
+                  typeof aiItem.importance === "number" &&
+                  aiItem.importance >= 1 &&
+                  aiItem.importance <= 5
+                    ? (aiItem.importance as ProcessedArticle["importance"])
+                    : 3,
+              };
+            } else {
+              processedArticle = fallbackArticle(article);
+            }
+
+            processedCache.set(key, { value: processedArticle, expiresAt: Date.now() + ONE_HOUR });
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown AI error";
+          console.error(\`[ai] processArticlesInBatches failed: \${message}\`);
+
+          if (
+            message.includes("429") ||
+            message.includes("401") ||
+            message.toLowerCase().includes("quota")
+          ) {
+            aiDisabledUntil = Date.now() + AI_FAILURE_COOLDOWN;
+          }
+
+          for (const article of uncached) {
+            const key = cacheKey(article);
+            processedCache.set(key, { value: fallbackArticle(article), expiresAt: Date.now() + ONE_HOUR });
+          }
+        }
+      }
+    }
+
+    for (let i = index; i < index + slice.length; i++) {
+      const article = processed[i];
+      const key = cacheKey(article);
+      const cached = processedCache.get(key)!.value;
+
+      processed[i] = {
+        ...article,
+        summary: cached.clean_summary,
+        domain: cached.domain,
+        tags: cached.tags,
+        importance: cached.importance,
+      };
+    }
   }
 
   return processed;
