@@ -37,8 +37,8 @@ const client =
   process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== "your_key_here"
     ? new OpenAI({
         apiKey: process.env.OPENAI_API_KEY,
-        maxRetries: 0,
-        timeout: 2500,
+        maxRetries: 2,
+        timeout: 30000,
       })
     : null;
 

@@ -161,7 +161,12 @@ export async function saveArticlesToDb(articles: Article[]) {
           processed_at
         )
         VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10)
-        ON CONFLICT (url) DO NOTHING
+        ON CONFLICT (url) DO UPDATE SET
+          summary = EXCLUDED.summary,
+          domain = EXCLUDED.domain,
+          tags = EXCLUDED.tags,
+          importance = EXCLUDED.importance,
+          processed_at = EXCLUDED.processed_at
       `,
       [
         article.id,
