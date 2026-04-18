@@ -7,9 +7,16 @@ import { Tag } from "@/components/Tag";
 type ArticleCardProps = {
   article: Article;
   isHighlighted?: boolean;
+  activeTags?: string[];
+  onTagClick?: (tag: string) => void;
 };
 
-export function ArticleCard({ article, isHighlighted = false }: ArticleCardProps) {
+export function ArticleCard({
+  article,
+  isHighlighted = false,
+  activeTags = [],
+  onTagClick,
+}: ArticleCardProps) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -37,7 +44,12 @@ export function ArticleCard({ article, isHighlighted = false }: ArticleCardProps
       {article.tags?.length ? (
         <div className="mt-4 flex flex-wrap gap-2">
           {article.tags.map((tag) => (
-            <Tag key={tag} label={tag} />
+            <Tag
+              key={tag}
+              label={tag}
+              active={activeTags.includes(tag)}
+              onClick={onTagClick}
+            />
           ))}
         </div>
       ) : null}
