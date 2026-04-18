@@ -1,6 +1,7 @@
 "use client";
 
 import { Article } from "@/lib/types";
+import { Tag } from "@/components/Tag";
 
 type ArticleListProps = {
   articles: Article[];
@@ -18,35 +19,35 @@ export function ArticleList({
   onTagClick,
 }: ArticleListProps) {
   return (
-    <section className="rounded-[2rem] border border-line bg-white p-6 shadow-panel">
-      <div className="mb-4 flex items-center justify-between gap-4">
+    <section className="surface-card p-4 sm:p-6">
+      <div className="flex items-center justify-between gap-4 border-b border-slate-200 pb-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-            Drill Down
-          </p>
-          <h2 className="mt-1 text-2xl font-semibold text-ink">Articles</h2>
+          <p className="section-kicker">Drill-Down Articles</p>
+          <h2 className="mt-1 text-xl font-semibold text-slate-900">Articles</h2>
         </div>
         <span className="text-sm text-slate-500">{articles.length} visible</span>
       </div>
 
       {articles.length ? (
-        <div className="space-y-3">
+        <div className="mt-4 space-y-3">
           {articles.map((article) => (
             <article
               key={article.id}
-              className="rounded-2xl border border-line bg-mist px-5 py-4"
+              className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md"
             >
               <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-slate-400">
-                    <span>{article.domain}</span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">
+                      {article.domain}
+                    </span>
                     {article.source ? <span>{article.source}</span> : null}
                     <span>{article.date}</span>
                   </div>
-                  <h3 className="mt-2 text-lg font-semibold text-ink">{article.headline}</h3>
+                  <h3 className="mt-3 text-lg font-semibold text-slate-900">{article.headline}</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-600">{article.summary}</p>
                 </div>
-                <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-accent">
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
                   {personalizedView
                     ? `${(scoreLookup?.get(article.id) ?? article.importance).toFixed(1)}`
                     : `${article.importance}/5`}
@@ -54,18 +55,12 @@ export function ArticleList({
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 {article.tags.map((tag) => (
-                  <button
+                  <Tag
                     key={tag}
-                    type="button"
-                    onClick={() => onTagClick(tag)}
-                    className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                      activeTags.includes(tag)
-                        ? "border-accent bg-accent text-white"
-                        : "border-line bg-white text-slate-600 hover:border-accent hover:text-accent"
-                    }`}
-                  >
-                    #{tag}
-                  </button>
+                    label={tag}
+                    active={activeTags.includes(tag)}
+                    onClick={onTagClick}
+                  />
                 ))}
               </div>
               {article.url ? (
@@ -73,7 +68,7 @@ export function ArticleList({
                   href={article.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-4 inline-flex text-sm font-medium text-accent hover:underline"
+                  className="mt-4 inline-flex text-sm font-medium text-sky-700 hover:underline"
                 >
                   Open article
                 </a>
@@ -82,8 +77,8 @@ export function ArticleList({
           ))}
         </div>
       ) : (
-        <div className="rounded-2xl border border-dashed border-line bg-mist px-5 py-6 text-sm text-slate-500">
-          No articles match the current filters. Broaden the time range, domain, or tag set.
+        <div className="surface-muted mt-4 border-dashed text-sm text-slate-500">
+          No signals yet — try adjusting filters.
         </div>
       )}
     </section>

@@ -1,5 +1,6 @@
 "use client";
 
+import { Tag } from "@/components/Tag";
 import { ArticleDomain } from "@/lib/types";
 import { UserProfile } from "@/lib/user";
 
@@ -8,11 +9,13 @@ type FiltersBarProps = {
   activeDomain: "All" | ArticleDomain;
   activeTags: string[];
   availableTags: string[];
+  tagQuery: string;
   personalizedView: boolean;
   profile: UserProfile;
   onTimeRangeChange: (value: "today" | "week" | "month") => void;
   onDomainChange: (value: "All" | ArticleDomain) => void;
   onTagToggle: (tag: string) => void;
+  onTagQueryChange: (value: string) => void;
   onClearTags: () => void;
   onPersonalizedViewChange: (value: boolean) => void;
   onPreferredDomainToggle: (domain: ArticleDomain) => void;
@@ -43,56 +46,58 @@ export function FiltersBar({
   activeDomain,
   activeTags,
   availableTags,
+  tagQuery,
   personalizedView,
   profile,
   onTimeRangeChange,
   onDomainChange,
   onTagToggle,
+  onTagQueryChange,
   onClearTags,
   onPersonalizedViewChange,
   onPreferredDomainToggle,
   onPreferredTagToggle,
   onExcludedTagToggle,
 }: FiltersBarProps) {
+  const visibleTags = availableTags.filter((tag) =>
+    tag.toLowerCase().includes(tagQuery.trim().toLowerCase()),
+  );
+
   return (
-    <section className="rounded-[2rem] border border-line bg-white/90 p-6 shadow-panel">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-4 border-b border-line pb-5">
+    <section className="surface-card sticky top-4 z-20 p-4 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-            View Mode
-          </p>
+          <p className="section-kicker">Filters</p>
           <p className="mt-1 text-sm text-slate-500">
-            Turn personalization on to rank content by your interests.
+            Time, domain, tags, and personal ranking controls.
           </p>
         </div>
         <button
           type="button"
           onClick={() => onPersonalizedViewChange(!personalizedView)}
-          className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+          className={`rounded-full px-4 py-2 text-sm font-medium transition ${
             personalizedView
-              ? "border-accent bg-accent text-white"
-              : "border-line bg-mist text-slate-600 hover:border-accent hover:text-accent"
+              ? "bg-sky-600 text-white shadow-sm"
+              : "border border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200"
           }`}
         >
           {personalizedView ? "Personalized View On" : "Personalized View Off"}
         </button>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[auto_auto_1fr] lg:items-start">
+      <div className="mt-4 grid gap-4 xl:grid-cols-[auto_auto_minmax(0,1fr)]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-            Time
-          </p>
+          <p className="section-kicker">Time Range</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {timeRanges.map((option) => (
               <button
                 key={option.value}
                 type="button"
                 onClick={() => onTimeRangeChange(option.value)}
-                className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                   timeRange === option.value
-                    ? "border-accent bg-accent text-white"
-                    : "border-line bg-mist text-slate-600 hover:border-accent hover:text-accent"
+                    ? "bg-sky-600 text-white shadow-sm"
+                    : "border border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200"
                 }`}
               >
                 {option.label}
@@ -102,19 +107,17 @@ export function FiltersBar({
         </div>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-            Domain
-          </p>
+          <p className="section-kicker">Domain</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {domains.map((domain) => (
               <button
                 key={domain}
                 type="button"
                 onClick={() => onDomainChange(domain)}
-                className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                   activeDomain === domain
-                    ? "border-accent bg-accent text-white"
-                    : "border-line bg-mist text-slate-600 hover:border-accent hover:text-accent"
+                    ? "bg-sky-600 text-white shadow-sm"
+                    : "border border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200"
                 }`}
               >
                 {domain}
@@ -125,93 +128,75 @@ export function FiltersBar({
 
         <div>
           <div className="flex items-center justify-between gap-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-              Tags
-            </p>
+            <p className="section-kicker">Tag Search</p>
             {activeTags.length ? (
               <button
                 type="button"
                 onClick={onClearTags}
-                className="text-sm font-medium text-accent"
+                className="text-sm font-medium text-sky-700"
               >
                 Clear tags
               </button>
             ) : null}
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {availableTags.length ? (
-              availableTags.map((tag) => (
-                <button
-                  key={tag}
-                  type="button"
-                  onClick={() => onTagToggle(tag)}
-                  className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                    activeTags.includes(tag)
-                      ? "border-accent bg-accent text-white"
-                      : "border-line bg-white text-slate-600 hover:border-accent hover:text-accent"
-                  }`}
-                >
-                  #{tag}
-                </button>
-              ))
+          <div className="mt-3 space-y-3">
+            <input
+              value={tagQuery}
+              onChange={(event) => onTagQueryChange(event.target.value)}
+              placeholder="Search tags"
+              className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
+            />
+            {visibleTags.length ? (
+              <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto pr-1">
+                {visibleTags.map((tag) => (
+                  <Tag
+                    key={tag}
+                    label={tag}
+                    active={activeTags.includes(tag)}
+                    onClick={onTagToggle}
+                  />
+                ))}
+              </div>
             ) : (
-              <p className="text-sm text-slate-500">No tags available for the current dataset.</p>
+              <p className="text-sm text-slate-500">No matching tags.</p>
             )}
           </div>
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 border-t border-line pt-6 lg:grid-cols-3">
+      <div className="mt-4 grid gap-4 border-t border-slate-200 pt-4 lg:grid-cols-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-            Preferred Domains
-          </p>
+          <p className="section-kicker">Preferred Domains</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {domains
               .filter((domain): domain is ArticleDomain => domain !== "All")
               .map((domain) => (
-                <button
+                <Tag
                   key={`preferred-${domain}`}
-                  type="button"
+                  label={domain}
+                  active={profile.preferred_domains.includes(domain)}
                   onClick={() => onPreferredDomainToggle(domain)}
-                  className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                    profile.preferred_domains.includes(domain)
-                      ? "border-accent bg-accent text-white"
-                      : "border-line bg-white text-slate-600 hover:border-accent hover:text-accent"
-                  }`}
-                >
-                  {domain}
-                </button>
+                />
               ))}
           </div>
         </div>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-            Preferred Tags
-          </p>
+          <p className="section-kicker">Preferred Tags</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {availableTags.slice(0, 20).map((tag) => (
-              <button
+              <Tag
                 key={`preferred-tag-${tag}`}
-                type="button"
-                onClick={() => onPreferredTagToggle(tag)}
-                className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-                  profile.preferred_tags.includes(tag)
-                    ? "border-accent bg-accent text-white"
-                    : "border-line bg-white text-slate-600 hover:border-accent hover:text-accent"
-                }`}
-              >
-                #{tag}
-              </button>
+                label={tag}
+                active={profile.preferred_tags.includes(tag)}
+                onClick={onPreferredTagToggle}
+              />
             ))}
           </div>
         </div>
 
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-            Excluded Tags
-          </p>
+          <p className="section-kicker">Excluded Tags</p>
           <div className="mt-3 flex flex-wrap gap-2">
             {availableTags.slice(0, 20).map((tag) => (
               <button
@@ -220,8 +205,8 @@ export function FiltersBar({
                 onClick={() => onExcludedTagToggle(tag)}
                 className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
                   profile.excluded_tags.includes(tag)
-                    ? "border-rose-500 bg-rose-500 text-white"
-                    : "border-line bg-white text-slate-600 hover:border-rose-500 hover:text-rose-600"
+                    ? "border-rose-600 bg-rose-600 text-white"
+                    : "border-slate-200 bg-white text-slate-700 hover:border-rose-400 hover:text-rose-600"
                 }`}
               >
                 #{tag}

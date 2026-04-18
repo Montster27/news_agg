@@ -1,14 +1,17 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { ArticleDomain } from "@/lib/types";
+import { AppShell } from "@/components/AppShell";
 import { FiltersBar } from "@/components/FiltersBar";
 import { TopSignals } from "@/components/TopSignals";
 import type { Article } from "@/lib/types";
 import type { WeeklyBrief } from "@/lib/brief";
 import type { PatternAnalysis } from "@/lib/patterns";
 import type { LongTermTrendAnalysis } from "@/lib/db";
+import type { InsightEngineResult } from "@/lib/insights";
 import {
   articleHasExcludedTag,
   defaultUserProfile,
@@ -20,12 +23,27 @@ import {
 
 const WeeklyShifts = dynamic(
   () => import("@/components/WeeklyShifts").then((mod) => mod.WeeklyShifts),
+  {
+    loading: () => <div className="surface-card h-56 animate-pulse bg-slate-100 p-6" />,
+  },
+);
+const KeyInsights = dynamic(
+  () => import("@/components/KeyInsights").then((mod) => mod.KeyInsights),
+  {
+    loading: () => <div className="surface-card h-56 animate-pulse bg-slate-100 p-6" />,
+  },
 );
 const TrendsPanel = dynamic(
   () => import("@/components/TrendsPanel").then((mod) => mod.TrendsPanel),
+  {
+    loading: () => <div className="surface-card h-80 animate-pulse bg-slate-100 p-6" />,
+  },
 );
 const ArticleList = dynamic(
   () => import("@/components/ArticleList").then((mod) => mod.ArticleList),
+  {
+    loading: () => <div className="surface-card h-96 animate-pulse bg-slate-100 p-6" />,
+  },
 );
 
 type CommandCenterClientProps = {
@@ -33,6 +51,7 @@ type CommandCenterClientProps = {
   brief: WeeklyBrief;
   patterns: PatternAnalysis;
   longTermTrends: LongTermTrendAnalysis;
+  insightReport: InsightEngineResult;
   fetchedAt: string;
 };
 
@@ -63,11 +82,13 @@ export function CommandCenterClient({
   brief,
   patterns,
   longTermTrends,
+  insightReport,
   fetchedAt,
 }: CommandCenterClientProps) {
   const [timeRange, setTimeRange] = useState<"today" | "week" | "month">("week");
   const [activeDomain, setActiveDomain] = useState<"All" | ArticleDomain>("All");
   const [activeTags, setActiveTags] = useState<string[]>([]);
+  const [tagQuery, setTagQuery] = useState("");
   const [personalizedView, setPersonalizedView] = useState(false);
   const [profile, setProfile] = useState<UserProfile>(defaultUserProfile);
 
@@ -180,6 +201,23 @@ export function CommandCenterClient({
     });
   }, [brief.top_shifts, personalizedView, profile.preferred_tags]);
 
+  const visibleInsights = useMemo(() => {
+    if (!activeTags.length) {
+      return insightReport.insights.slice(0, 5);
+    }
+
+    return insightReport.insights.filter((insight) => {
+      const text = `${insight.title} ${insight.explanation}`.toLowerCase();
+      return activeTags.some((tag) => {
+        const readable = tag.replaceAll("_", " ");
+        return text.includes(tag) || text.includes(readable);
+      });
+    });
+  }, [activeTags, insightReport.insights]);
+
+  const headerLabel =
+    timeRange === "today" ? "Today" : timeRange === "week" ? "This Week" : "This Month";
+
   const setSingleTag = (tag: string) => {
     setActiveTags((current) =>
       current.includes(tag) ? current : [...current, tag],
@@ -229,50 +267,85 @@ export function CommandCenterClient({
     }));
   };
 
+  const rightRail = (
+    <div className="space-y-6">
+      <WeeklyShifts
+        items={orderedWeeklyShifts}
+        activeTag={activeTags[0] ?? null}
+        onShiftClick={handleShiftClick}
+      />
+      <KeyInsights
+        insights={visibleInsights}
+        activeTags={activeTags}
+        onInsightClick={handleShiftClick}
+      />
+      <TrendsPanel
+        emerging={filteredPatterns}
+        longTerm={filteredLongTerm}
+        activeTags={activeTags}
+        personalizedView={personalizedView}
+        onTrendClick={setSingleTag}
+      />
+    </div>
+  );
+
   return (
-    <main className="mx-auto max-w-7xl px-6 py-10">
-      <header className="rounded-[2rem] border border-line bg-white/90 p-8 shadow-panel backdrop-blur">
-        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-4">
-            <p className="text-sm font-semibold uppercase tracking-[0.28em] text-accent">
-              Command Center
-            </p>
-            <div className="space-y-3">
-              <h1 className="max-w-4xl text-4xl font-semibold tracking-tight text-ink">
-                One place to see what matters now, what changed this week, and where signals are moving.
-              </h1>
-              <p className="max-w-3xl text-base leading-7 text-slate-600">
-                Built for fast daily scanning: top articles, weekly shifts, emerging trend tags,
-                long-term direction, and filtered drill-down articles.
+    <AppShell aside={rightRail} activePath="/">
+      <div className="space-y-6">
+        <header className="surface-card overflow-hidden p-6 sm:p-8">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="space-y-4">
+              <p className="text-sm font-semibold uppercase tracking-[0.28em] text-sky-700">
+                Command Center
               </p>
+              <div className="space-y-3">
+                <h1 className="max-w-4xl text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
+                  High-signal view of what matters now, what changed recently, and where the trendline is pointing.
+                </h1>
+                <p className="max-w-3xl text-base leading-7 text-slate-600">
+                  Scan the top five signals, review weekly shifts, inspect structural insights,
+                  and drill into supporting articles without leaving the page.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2 text-sm text-slate-500">
+              <div>{headerLabel}</div>
+              <div>Last refresh {new Date(fetchedAt).toLocaleString()}</div>
             </div>
           </div>
-          <div className="text-sm text-slate-500">
-            Last refresh {new Date(fetchedAt).toLocaleString()}
-          </div>
-        </div>
-      </header>
 
-      <div className="mt-8">
+          <div className="panel-divider flex flex-wrap gap-3">
+            <Link href="/trends" className="tag-pill">
+              View trends
+            </Link>
+            <Link href="/patterns" className="tag-pill">
+              View patterns
+            </Link>
+            <Link href="/brief" className="tag-pill">
+              Weekly brief
+            </Link>
+          </div>
+        </header>
+
         <FiltersBar
           timeRange={timeRange}
           activeDomain={activeDomain}
           activeTags={activeTags}
           availableTags={availableTags}
+          tagQuery={tagQuery}
           personalizedView={personalizedView}
           profile={profile}
           onTimeRangeChange={setTimeRange}
           onDomainChange={setActiveDomain}
           onTagToggle={toggleTag}
+          onTagQueryChange={setTagQuery}
           onClearTags={() => setActiveTags([])}
           onPersonalizedViewChange={setPersonalizedView}
           onPreferredDomainToggle={togglePreferredDomain}
           onPreferredTagToggle={togglePreferredTag}
           onExcludedTagToggle={toggleExcludedTag}
         />
-      </div>
 
-      <div className="mt-8">
         <TopSignals
           articles={topSignals}
           activeTags={activeTags}
@@ -280,27 +353,11 @@ export function CommandCenterClient({
           scoreLookup={scoreLookup}
           onTagClick={toggleTag}
         />
-      </div>
 
-      <div className="mt-8">
-        <WeeklyShifts
-          items={orderedWeeklyShifts}
-          activeTag={activeTags[0] ?? null}
-          onShiftClick={handleShiftClick}
-        />
-      </div>
+        <div className="xl:hidden">
+          {rightRail}
+        </div>
 
-      <div className="mt-8">
-        <TrendsPanel
-          emerging={filteredPatterns}
-          longTerm={filteredLongTerm}
-          activeTags={activeTags}
-          personalizedView={personalizedView}
-          onTrendClick={setSingleTag}
-        />
-      </div>
-
-      <div className="mt-8">
         <ArticleList
           articles={sortedArticles}
           activeTags={activeTags}
@@ -309,6 +366,6 @@ export function CommandCenterClient({
           onTagClick={toggleTag}
         />
       </div>
-    </main>
+    </AppShell>
   );
 }

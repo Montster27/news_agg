@@ -1,6 +1,6 @@
 import "server-only";
 
-import { Pool } from "@neondatabase/serverless";
+import { Pool } from "pg";
 import type { WeeklyBrief } from "@/lib/brief";
 import type { PatternAnalysis } from "@/lib/patterns";
 import type { Article, ArticleDomain } from "@/lib/types";
@@ -20,6 +20,13 @@ type StoredPatternRow = {
   count: number;
   delta: number;
   domain: string;
+};
+
+export type StoredInsight = {
+  week: string;
+  title: string;
+  explanation: string;
+  confidence: string;
 };
 
 export type TagTrendPoint = {
@@ -94,6 +101,18 @@ export async function initDb() {
         id BIGSERIAL PRIMARY KEY,
         week TEXT NOT NULL UNIQUE,
         content JSONB NOT NULL
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS insights (
+        id BIGSERIAL PRIMARY KEY,
+        week TEXT NOT NULL,
+        title TEXT NOT NULL,
+        explanation TEXT NOT NULL,
+        confidence TEXT NOT NULL,
+        content JSONB NOT NULL,
+        UNIQUE (week, title)
       );
     `);
 
@@ -212,6 +231,38 @@ export async function saveBriefToDb(week: string, content: WeeklyBrief) {
     `,
     [week, JSON.stringify(content)],
   );
+}
+
+export async function saveInsightsToDb(
+  week: string,
+  insights: Array<{ title: string; explanation: string; confidence: string }>,
+) {
+  if (!pool || !insights.length) {
+    return;
+  }
+
+  await initDb();
+
+  for (const insight of insights) {
+    await pool.query(
+      `
+        INSERT INTO insights (week, title, explanation, confidence, content)
+        VALUES ($1, $2, $3, $4, $5::jsonb)
+        ON CONFLICT (week, title)
+        DO UPDATE SET
+          explanation = EXCLUDED.explanation,
+          confidence = EXCLUDED.confidence,
+          content = EXCLUDED.content
+      `,
+      [
+        week,
+        insight.title,
+        insight.explanation,
+        insight.confidence,
+        JSON.stringify(insight),
+      ],
+    );
+  }
 }
 
 export async function getTagTrend(

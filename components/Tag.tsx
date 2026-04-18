@@ -11,11 +11,7 @@ export function Tag({ label, active = false, onClick }: TagProps) {
     <button
       type="button"
       onClick={() => onClick?.(label)}
-      className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
-        active
-          ? "border-accent bg-accent text-white"
-          : "border-line bg-white text-slate-600 hover:border-accent hover:text-accent"
-      }`}
+      className={`tag-pill ${active ? "tag-pill-active" : ""}`}
     >
       #{label}
     </button>

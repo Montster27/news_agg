@@ -10,7 +10,6 @@ const config: Config = {
     extend: {
       colors: {
         ink: "#111827",
-        slate: "#64748b",
         mist: "#f8fafc",
         line: "#dbe4ee",
         accent: "#0f766e",

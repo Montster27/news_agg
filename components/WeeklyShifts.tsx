@@ -8,37 +8,35 @@ type WeeklyShiftsProps = {
 
 export function WeeklyShifts({ items, activeTag, onShiftClick }: WeeklyShiftsProps) {
   return (
-    <section className="rounded-[2rem] border border-line bg-white p-6 shadow-panel">
-      <div className="mb-4 flex items-center justify-between gap-4">
+    <section className="surface-card p-4 sm:p-6">
+      <div className="flex items-center justify-between gap-4 border-b border-slate-200 pb-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-            Recently
-          </p>
-          <h2 className="mt-1 text-2xl font-semibold text-ink">Weekly Shifts</h2>
+          <p className="section-kicker">What Changed Recently</p>
+          <h2 className="mt-1 text-xl font-semibold text-slate-900">Weekly Shifts</h2>
         </div>
         {activeTag ? (
-          <span className="text-sm text-accent">Highlighting #{activeTag}</span>
+          <span className="text-sm text-sky-700">Highlighting #{activeTag}</span>
         ) : (
           <span className="text-sm text-slate-500">Tap a shift to focus support</span>
         )}
       </div>
 
       {items.length ? (
-        <div className="space-y-3">
+        <div className="mt-4 space-y-3">
           {items.map((item) => (
             <button
               key={item}
               type="button"
               onClick={() => onShiftClick(item)}
-              className="w-full rounded-2xl border border-line bg-mist px-5 py-4 text-left text-sm leading-6 text-slate-600 transition hover:border-accent hover:bg-white"
+              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left text-sm leading-6 text-slate-600 transition duration-200 hover:-translate-y-0.5 hover:border-sky-300 hover:bg-white hover:shadow-sm"
             >
               {item}
             </button>
           ))}
         </div>
       ) : (
-        <div className="rounded-2xl border border-dashed border-line bg-mist px-5 py-6 text-sm text-slate-500">
-          Weekly shift summaries are not available yet.
+        <div className="surface-muted mt-4 border-dashed text-sm text-slate-500">
+          No signals yet — try adjusting filters.
         </div>
       )}
     </section>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AppShell } from "@/components/AppShell";
 import { analyzeLongTermTrends, hasDatabase } from "@/lib/db";
 import { ArticleDomain } from "@/lib/types";
 
@@ -22,11 +23,11 @@ function Sparkline({
   const max = Math.max(...points.map((point) => point.count), 1);
 
   return (
-    <div className="mt-3 flex items-end gap-1">
+    <div className="mt-3 flex items-end gap-1.5">
       {points.map((point) => (
         <div
           key={point.week}
-          className="w-5 rounded-t bg-accent/70"
+          className="w-4 rounded-t bg-sky-500/80"
           style={{ height: `${Math.max((point.count / max) * 56, 6)}px` }}
           title={`${point.week}: ${point.count}`}
         />
@@ -57,18 +58,18 @@ function TrendSection({
         : "text-slate-600";
 
   return (
-    <section className="mt-10">
-      <h2 className="text-2xl font-semibold text-ink">{title}</h2>
+    <section className="surface-card p-6">
+      <h2 className="section-title">{title}</h2>
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         {items.map((item) => (
           <div
             key={item.tag}
-            className="rounded-2xl border border-line bg-white px-5 py-4 shadow-panel"
+            className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm"
           >
             <div className="flex items-center justify-between gap-4">
-              <span className="font-medium text-ink">#{item.tag}</span>
+              <span className="font-medium text-slate-900">#{item.tag}</span>
               <span className={`text-sm font-semibold ${toneClass}`}>
-                {item.delta > 0 ? `+${item.delta}` : item.delta}
+                {item.delta > 0 ? `▲ +${item.delta}` : `▼ ${item.delta}`}
               </span>
             </div>
             <p className="mt-2 text-xs uppercase tracking-[0.16em] text-slate-400">
@@ -96,55 +97,51 @@ export default async function TrendsPage({
   const trendData = await analyzeLongTermTrends(selectedDomain);
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
-      <div className="rounded-[2rem] border border-line bg-white p-8 shadow-panel">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-accent">
-              Long-Term Trends
-            </p>
-            <h1 className="mt-2 text-4xl font-semibold tracking-tight text-ink">
-              Historical shifts across weeks of stored pattern snapshots
-            </h1>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            <Link
-              href="/patterns"
-              className="inline-flex items-center justify-center rounded-full border border-line bg-mist px-5 py-3 text-sm font-semibold text-ink transition hover:border-accent hover:text-accent"
-            >
-              Weekly Patterns
-            </Link>
-            <Link
-              href="/"
-              className="inline-flex items-center justify-center rounded-full border border-line bg-white px-5 py-3 text-sm font-semibold text-ink transition hover:border-accent hover:text-accent"
-            >
-              Back to Dashboard
-            </Link>
-          </div>
-        </div>
-
-        <section className="mt-8 rounded-2xl border border-line bg-mist p-5">
-          <div className="flex flex-wrap items-center gap-2">
-            {domains.map((domain) => (
-              <Link
-                key={domain}
-                href={domain === "All" ? "/trends" : `/trends?domain=${domain}`}
-                className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
-                  selectedDomain === domain
-                    ? "border-accent bg-accent text-white"
-                    : "border-line bg-white text-slate-600 hover:border-accent hover:text-accent"
-                }`}
-              >
-                {domain}
+    <AppShell activePath="/trends">
+      <div className="space-y-6">
+        <section className="surface-card p-6 sm:p-8">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-sky-700">
+                Long-Term Trends
+              </p>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-900 sm:text-4xl">
+                Historical shifts across weeks of stored pattern snapshots
+              </h1>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Link href="/patterns" className="tag-pill">
+                Weekly patterns
               </Link>
-            ))}
+              <Link href="/" className="tag-pill">
+                Dashboard
+              </Link>
+            </div>
           </div>
-          {!hasDatabase() ? (
-            <p className="mt-3 text-sm text-amber-800">
-              `POSTGRES_URL` is not configured locally, so persistent historical trends are not
-              available yet.
-            </p>
-          ) : null}
+
+          <section className="panel-divider">
+            <div className="flex flex-wrap items-center gap-2">
+              {domains.map((domain) => (
+                <Link
+                  key={domain}
+                  href={domain === "All" ? "/trends" : `/trends?domain=${domain}`}
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                    selectedDomain === domain
+                      ? "bg-sky-600 text-white shadow-sm"
+                      : "border border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200"
+                  }`}
+                >
+                  {domain}
+                </Link>
+              ))}
+            </div>
+            {!hasDatabase() ? (
+              <p className="mt-3 text-sm text-amber-800">
+                `POSTGRES_URL` is not configured locally, so persistent historical trends are not
+                available yet.
+              </p>
+            ) : null}
+          </section>
         </section>
 
         {trendData.available ? (
@@ -154,12 +151,12 @@ export default async function TrendsPage({
             <TrendSection title="Stable Core Themes" items={trendData.stable} tone="stable" />
           </>
         ) : (
-          <section className="mt-10 rounded-2xl border border-line bg-white px-5 py-6 text-sm text-slate-500">
+          <section className="surface-muted text-sm text-slate-500">
             Historical trend data will appear here after `POSTGRES_URL` is configured and weekly
             pattern snapshots begin accumulating.
           </section>
         )}
       </div>
-    </main>
+    </AppShell>
   );
 }

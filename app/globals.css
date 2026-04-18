@@ -6,13 +6,25 @@
   color-scheme: light;
 }
 
+html {
+  background: #f8fafc;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
   background:
-    radial-gradient(circle at top, rgba(15, 118, 110, 0.08), transparent 32%),
-    linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
-  color: #111827;
+    radial-gradient(circle at top left, rgba(14, 165, 233, 0.08), transparent 26%),
+    radial-gradient(circle at top right, rgba(15, 23, 42, 0.05), transparent 24%),
+    linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  color: #0f172a;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
 }
 
 a {
@@ -22,4 +34,38 @@ a {
 
 * {
   box-sizing: border-box;
+}
+
+::selection {
+  background: rgba(14, 165, 233, 0.18);
+}
+
+@layer components {
+  .surface-card {
+    @apply rounded-2xl border border-slate-200 bg-white p-6 shadow-sm;
+  }
+
+  .surface-muted {
+    @apply rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm;
+  }
+
+  .section-title {
+    @apply text-lg font-semibold text-slate-900;
+  }
+
+  .section-kicker {
+    @apply text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500;
+  }
+
+  .tag-pill {
+    @apply rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-200;
+  }
+
+  .tag-pill-active {
+    @apply border-sky-600 bg-sky-600 text-white hover:border-sky-700 hover:bg-sky-700;
+  }
+
+  .panel-divider {
+    @apply mt-4 border-t border-slate-200 pt-4;
+  }
 }

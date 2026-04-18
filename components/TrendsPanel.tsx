@@ -30,11 +30,11 @@ function Sparkline({
   const max = Math.max(...points.map((point) => point.count), 1);
 
   return (
-    <div className="mt-3 flex items-end gap-1">
+    <div className="mt-3 flex items-end gap-1.5">
       {points.map((point) => (
         <div
           key={point.week}
-          className="w-4 rounded-t bg-accent/70"
+          className="w-3 rounded-t bg-sky-500/80"
           style={{ height: `${Math.max((point.count / max) * 42, 6)}px` }}
           title={`${point.week}: ${point.count}`}
         />
@@ -51,14 +51,12 @@ export function TrendsPanel({
   onTrendClick,
 }: TrendsPanelProps) {
   return (
-    <div className="grid gap-6 xl:grid-cols-2">
-      <section className="rounded-[2rem] border border-line bg-white p-6 shadow-panel">
-        <div className="mb-4 flex items-center justify-between gap-4">
+    <div className="space-y-6">
+      <section className="surface-card p-4 sm:p-6">
+        <div className="flex items-center justify-between gap-4 border-b border-slate-200 pb-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-              Near Term
-            </p>
-            <h2 className="mt-1 text-2xl font-semibold text-ink">Emerging Trends</h2>
+            <p className="section-kicker">Where Things Are Going</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-900">Emerging Trends</h2>
           </div>
           <span className="text-sm text-slate-500">
             {personalizedView ? "Priority adjusted by profile" : "Highest positive delta"}
@@ -66,27 +64,27 @@ export function TrendsPanel({
         </div>
 
         {emerging.length ? (
-          <div className="space-y-3">
+          <div className="mt-4 space-y-3">
             {emerging.map((trend) => (
               <button
                 key={trend.tag}
                 type="button"
                 onClick={() => onTrendClick(trend.tag)}
-                className={`flex w-full items-center justify-between rounded-2xl border px-5 py-4 text-left transition ${
+                className={`flex w-full items-center justify-between rounded-2xl border px-4 py-4 text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-sm ${
                   activeTags.includes(trend.tag)
-                    ? "border-accent bg-accent/5"
-                    : "border-line bg-mist hover:border-accent"
+                    ? "border-sky-300 bg-sky-50"
+                    : "border-slate-200 bg-slate-50 hover:border-sky-300 hover:bg-white"
                 }`}
               >
                 <div>
-                  <div className="font-medium text-ink">#{trend.tag}</div>
+                  <div className="font-medium text-slate-900">#{trend.tag}</div>
                   <div className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-400">
                     {trend.signal}
                   </div>
                 </div>
                 <div className="text-right">
                   <div className="text-sm font-semibold text-emerald-700">
-                    +{trend.delta}
+                    ▲ +{trend.delta}
                   </div>
                   <div className="text-xs text-slate-500">
                     {trend.current} vs {trend.previous}
@@ -96,19 +94,17 @@ export function TrendsPanel({
             ))}
           </div>
         ) : (
-          <div className="rounded-2xl border border-dashed border-line bg-mist px-5 py-6 text-sm text-slate-500">
-            No emerging trends are available for the current filters.
+          <div className="surface-muted mt-4 border-dashed text-sm text-slate-500">
+            No signals yet — try adjusting filters.
           </div>
         )}
       </section>
 
-      <section className="rounded-[2rem] border border-line bg-white p-6 shadow-panel">
-        <div className="mb-4 flex items-center justify-between gap-4">
+      <section className="surface-card p-4 sm:p-6">
+        <div className="flex items-center justify-between gap-4 border-b border-slate-200 pb-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-              Direction
-            </p>
-            <h2 className="mt-1 text-2xl font-semibold text-ink">Long-Term Trends</h2>
+            <p className="section-kicker">Six To Eight Weeks</p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-900">Long-Term Trends</h2>
           </div>
           <span className="text-sm text-slate-500">
             {personalizedView ? "Priority adjusted by profile" : "Top rising tags"}
@@ -116,22 +112,22 @@ export function TrendsPanel({
         </div>
 
         {longTerm.length ? (
-          <div className="space-y-3">
+          <div className="mt-4 space-y-3">
             {longTerm.map((trend) => (
               <button
                 key={trend.tag}
                 type="button"
                 onClick={() => onTrendClick(trend.tag)}
-                className={`w-full rounded-2xl border px-5 py-4 text-left transition ${
+                className={`w-full rounded-2xl border px-4 py-4 text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-sm ${
                   activeTags.includes(trend.tag)
-                    ? "border-accent bg-accent/5"
-                    : "border-line bg-mist hover:border-accent"
+                    ? "border-sky-300 bg-sky-50"
+                    : "border-slate-200 bg-slate-50 hover:border-sky-300 hover:bg-white"
                 }`}
               >
                 <div className="flex items-center justify-between gap-4">
-                  <span className="font-medium text-ink">#{trend.tag}</span>
+                  <span className="font-medium text-slate-900">#{trend.tag}</span>
                   <span className="text-sm font-semibold text-emerald-700">
-                    +{trend.delta}
+                    ▲ +{trend.delta}
                   </span>
                 </div>
                 <Sparkline points={trend.points} />
@@ -139,8 +135,8 @@ export function TrendsPanel({
             ))}
           </div>
         ) : (
-          <div className="rounded-2xl border border-dashed border-line bg-mist px-5 py-6 text-sm text-slate-500">
-            Long-term trend history is not available for the current filters.
+          <div className="surface-muted mt-4 border-dashed text-sm text-slate-500">
+            No signals yet — try adjusting filters.
           </div>
         )}
       </section>
