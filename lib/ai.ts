@@ -202,6 +202,8 @@ export async function processArticlesInBatches(articles: Article[]) {
 
         return {
           ...article,
+          processed_at: article.processed_at,
+          week: article.week,
           summary: aiResult.clean_summary,
           domain: aiResult.domain,
           tags: aiResult.tags,

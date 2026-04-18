@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { formatWeek } from "@/lib/ingest";
 import { Article, ArticleDomain } from "@/lib/types";
 
 const domains: ArticleDomain[] = ["AI", "Chips", "Infra", "Bio", "Energy", "Macro"];
@@ -50,9 +51,12 @@ export async function POST(request: NextRequest) {
   const sourceText = [body.headline, body.content].filter(Boolean).join(". ");
   const tags = inferTags(sourceText);
 
+  const processedAt = new Date();
   const article: Article = {
     id: crypto.randomUUID(),
-    date: new Date().toISOString().slice(0, 10),
+    date: processedAt.toISOString().slice(0, 10),
+    processed_at: processedAt.toISOString(),
+    week: formatWeek(processedAt),
     domain,
     headline: body.headline,
     summary:
