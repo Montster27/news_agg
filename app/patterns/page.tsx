@@ -1,23 +1,34 @@
 import Link from "next/link";
-import { articles } from "@/lib/data";
+import { ingestFeeds } from "@/lib/ingest";
 
-export default function PatternsPage() {
-  const counts = articles.reduce<Record<string, number>>((accumulator, article) => {
-    for (const tag of article.tags) {
-      accumulator[tag] = (accumulator[tag] ?? 0) + 1;
-    }
+export const dynamic = "force-dynamic";
 
-    return accumulator;
-  }, {});
+export default async function PatternsPage() {
+  const { articles } = await ingestFeeds();
 
-  const topTags = Object.entries(counts)
+  const topSources = Object.entries(
+    articles.reduce<Record<string, number>>((accumulator, article) => {
+      const source = article.source ?? "Unknown";
+      accumulator[source] = (accumulator[source] ?? 0) + 1;
+      return accumulator;
+    }, {}),
+  )
     .sort((left, right) => right[1] - left[1])
     .slice(0, 8);
 
+  const categoryCounts = Object.entries(
+    articles.reduce<Record<string, number>>((accumulator, article) => {
+      accumulator[article.domain] = (accumulator[article.domain] ?? 0) + 1;
+      return accumulator;
+    }, {}),
+  ).sort((left, right) => right[1] - left[1]);
+
+  const leadingCategory = categoryCounts[0]?.[0] ?? "Macro";
+  const leadingSource = topSources[0]?.[0] ?? "curated sources";
   const insights = [
-    "Energy-related topics are increasing as power access becomes a gating factor for AI expansion.",
-    "Data center buildout appears across infra, chips, and macro coverage, which suggests infrastructure financing and deployment are tightly linked.",
-    "Graphene and battery stories remain lower-volume, but they increasingly connect to practical operating constraints rather than pure research narratives.",
+    `${leadingCategory}-related coverage is leading the current dashboard window.`,
+    `${leadingSource} is contributing the highest share of visible articles right now.`,
+    "Cross-source duplication is trimmed at ingest time, so repeated headlines do not dominate the feed.",
   ];
 
   return (
@@ -41,15 +52,30 @@ export default function PatternsPage() {
         </div>
 
         <section className="mt-8">
-          <h2 className="text-2xl font-semibold text-ink">Top Tags</h2>
+          <h2 className="text-2xl font-semibold text-ink">Top Sources</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {topTags.map(([tag, count]) => (
+            {topSources.map(([source, count]) => (
               <div
-                key={tag}
+                key={source}
                 className="flex items-center justify-between rounded-2xl border border-line bg-mist px-5 py-4"
               >
-                <span className="font-medium text-ink">#{tag}</span>
+                <span className="font-medium text-ink">{source}</span>
                 <span className="text-sm text-slate-500">{count} mentions</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-10">
+          <h2 className="text-2xl font-semibold text-ink">Category Mix</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {categoryCounts.map(([category, count]) => (
+              <div
+                key={category}
+                className="flex items-center justify-between rounded-2xl border border-line bg-white px-5 py-4"
+              >
+                <span className="font-medium text-ink">{category}</span>
+                <span className="text-sm text-slate-500">{count} articles</span>
               </div>
             ))}
           </div>

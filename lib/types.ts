@@ -1,4 +1,12 @@
-export type ArticleDomain = "AI" | "Chips" | "Infra" | "Bio" | "Energy" | "Macro";
+export type ArticleDomain =
+  | "AI"
+  | "Chips"
+  | "Infra"
+  | "Bio"
+  | "Energy"
+  | "Macro"
+  | "General"
+  | "Frontier";
 
 export type Article = {
   id: string;
@@ -6,6 +14,8 @@ export type Article = {
   domain: ArticleDomain;
   headline: string;
   summary: string;
-  tags: string[];
-  importance: 1 | 2 | 3 | 4 | 5;
+  source?: string;
+  url?: string;
+  tags?: string[];
+  importance?: 1 | 2 | 3 | 4 | 5;
 };
