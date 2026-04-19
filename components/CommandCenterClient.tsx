@@ -17,6 +17,7 @@ import {
 } from "@/lib/feedback";
 import { ArticleDomain, ImportanceFeedback } from "@/lib/types";
 import { AppShell } from "@/components/AppShell";
+import { DesktopControls } from "@/components/DesktopControls";
 import { FiltersBar } from "@/components/FiltersBar";
 import { TopSignals } from "@/components/TopSignals";
 import type { Article } from "@/lib/types";
@@ -240,6 +241,41 @@ export function CommandCenterClient({
 
   const headerLabel =
     timeRange === "today" ? "Today" : timeRange === "week" ? "This Week" : "This Month";
+  const desktopExportPayload = useMemo(
+    () => ({
+      exportedAt: new Date().toISOString(),
+      view: {
+        timeRange,
+        activeDomain,
+        activeTags,
+        personalizedView,
+      },
+      articles: sortedArticles.map((article) => ({
+        id: article.id,
+        headline: article.headline,
+        summary: article.summary,
+        domain: article.domain,
+        tags: article.tags,
+        importance: article.importance,
+        score: scoreLookup.get(article.id) ?? article.importance,
+        source: article.source,
+        url: article.url,
+        date: article.date,
+      })),
+      feedback: feedbackMap,
+      learning: learningProfile,
+    }),
+    [
+      activeDomain,
+      activeTags,
+      feedbackMap,
+      learningProfile,
+      personalizedView,
+      scoreLookup,
+      sortedArticles,
+      timeRange,
+    ],
+  );
 
   const setSingleTag = (tag: string) => {
     setActiveTags((current) =>
@@ -371,6 +407,7 @@ export function CommandCenterClient({
             <div className="space-y-2 text-sm text-slate-500">
               <div>{headerLabel}</div>
               <div>Last refresh {new Date(fetchedAt).toLocaleString()}</div>
+              <DesktopControls exportPayload={desktopExportPayload} />
             </div>
           </div>
 
