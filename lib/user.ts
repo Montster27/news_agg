@@ -1,4 +1,9 @@
-import { Article, ArticleDomain } from "@/lib/types";
+import {
+  getEffectiveImportance,
+  getLearnedAdjustment,
+  type ImportanceLearningProfile,
+} from "@/lib/feedback";
+import { Article, ArticleDomain, ImportanceFeedback } from "@/lib/types";
 
 export type UserProfile = {
   preferred_domains: ArticleDomain[];
@@ -59,15 +64,25 @@ export function articleHasExcludedTag(article: Article, profile: UserProfile) {
   return article.tags.some((tag) => profile.excluded_tags.includes(tag));
 }
 
-export function scoreArticle(article: Article, profile: UserProfile) {
+export function scoreArticle(
+  article: Article,
+  profile: UserProfile,
+  feedback?: Record<string, ImportanceFeedback>,
+  learningProfile?: ImportanceLearningProfile,
+) {
   const tagMatches = article.tags.filter((tag) =>
     profile.preferred_tags.includes(tag),
   ).length;
   const domainMatch = profile.preferred_domains.includes(article.domain) ? 1 : 0;
+  const effectiveImportance = getEffectiveImportance(article, feedback ?? {});
+  const learnedAdjustment = learningProfile
+    ? getLearnedAdjustment(article, learningProfile)
+    : 0;
 
   return (
-    article.importance +
+    effectiveImportance +
     tagMatches * profile.importance_weights.tag_match +
-    domainMatch * profile.importance_weights.domain_match
+    domainMatch * profile.importance_weights.domain_match +
+    learnedAdjustment
   );
 }

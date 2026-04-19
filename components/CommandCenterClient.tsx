@@ -3,7 +3,19 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ArticleDomain } from "@/lib/types";
+import {
+  clearImportanceFeedback,
+  clearLearningProfile,
+  getEffectiveImportance,
+  loadImportanceFeedback,
+  loadLearningProfile,
+  rebuildLearningProfile,
+  resetUserImportance,
+  saveLearningProfile,
+  setUserImportance,
+  type ImportanceLearningProfile,
+} from "@/lib/feedback";
+import { ArticleDomain, ImportanceFeedback } from "@/lib/types";
 import { AppShell } from "@/components/AppShell";
 import { FiltersBar } from "@/components/FiltersBar";
 import { TopSignals } from "@/components/TopSignals";
@@ -91,10 +103,18 @@ export function CommandCenterClient({
   const [tagQuery, setTagQuery] = useState("");
   const [personalizedView, setPersonalizedView] = useState(false);
   const [profile, setProfile] = useState<UserProfile>(defaultUserProfile);
+  const [feedbackMap, setFeedbackMap] = useState<Record<string, ImportanceFeedback>>({});
+  const [learningProfile, setLearningProfile] =
+    useState<ImportanceLearningProfile>(loadLearningProfile);
 
   useEffect(() => {
     setProfile(loadUserProfile());
-  }, []);
+    const storedFeedback = loadImportanceFeedback();
+    const learned = rebuildLearningProfile(articles, storedFeedback);
+    setFeedbackMap(storedFeedback);
+    setLearningProfile(learned);
+    saveLearningProfile(learned);
+  }, [articles]);
 
   useEffect(() => {
     saveUserProfile(profile);
@@ -107,9 +127,12 @@ export function CommandCenterClient({
 
   const scoreLookup = useMemo(() => {
     return new Map(
-      articles.map((article) => [article.id, scoreArticle(article, profile)]),
+      articles.map((article) => [
+        article.id,
+        scoreArticle(article, profile, feedbackMap, learningProfile),
+      ]),
     );
-  }, [articles, profile]);
+  }, [articles, feedbackMap, learningProfile, profile]);
 
   const filteredArticles = useMemo(() => {
     return articles.filter((article) => {
@@ -163,31 +186,31 @@ export function CommandCenterClient({
       .sort((left, right) => {
         const rightScore = personalizedView
           ? (scoreLookup.get(right.id) ?? right.importance)
-          : right.importance;
+          : getEffectiveImportance(right, feedbackMap);
         const leftScore = personalizedView
           ? (scoreLookup.get(left.id) ?? left.importance)
-          : left.importance;
+          : getEffectiveImportance(left, feedbackMap);
 
         return rightScore - leftScore ||
-          right.importance - left.importance ||
+          getEffectiveImportance(right, feedbackMap) - getEffectiveImportance(left, feedbackMap) ||
           new Date(right.date).getTime() - new Date(left.date).getTime();
       })
       .slice(0, 5);
-  }, [filteredArticles, personalizedView, scoreLookup]);
+  }, [feedbackMap, filteredArticles, personalizedView, scoreLookup]);
 
   const sortedArticles = useMemo(() => {
     return [...filteredArticles].sort((left, right) => {
       const rightScore = personalizedView
         ? (scoreLookup.get(right.id) ?? right.importance)
-        : right.importance;
+        : getEffectiveImportance(right, feedbackMap);
       const leftScore = personalizedView
         ? (scoreLookup.get(left.id) ?? left.importance)
-        : left.importance;
+        : getEffectiveImportance(left, feedbackMap);
 
       return rightScore - leftScore ||
           new Date(right.date).getTime() - new Date(left.date).getTime();
     });
-  }, [filteredArticles, personalizedView, scoreLookup]);
+  }, [feedbackMap, filteredArticles, personalizedView, scoreLookup]);
 
   const orderedWeeklyShifts = useMemo(() => {
     if (!personalizedView) {
@@ -267,6 +290,43 @@ export function CommandCenterClient({
     }));
   };
 
+  const rebuildAndStoreLearning = (nextFeedback: Record<string, ImportanceFeedback>) => {
+    const nextLearningProfile = rebuildLearningProfile(articles, nextFeedback);
+    setLearningProfile(nextLearningProfile);
+    saveLearningProfile(nextLearningProfile);
+  };
+
+  const handleImportanceChange = (
+    article: Article,
+    userImportance: 1 | 2 | 3 | 4 | 5,
+  ) => {
+    const nextFeedback = setUserImportance(
+      article.id,
+      article.importance,
+      userImportance,
+      feedbackMap,
+    );
+    setFeedbackMap(nextFeedback);
+    rebuildAndStoreLearning(nextFeedback);
+  };
+
+  const handleImportanceReset = (article: Article) => {
+    const nextFeedback = resetUserImportance(article.id, feedbackMap);
+    setFeedbackMap(nextFeedback);
+    rebuildAndStoreLearning(nextFeedback);
+  };
+
+  const handleClearLearning = () => {
+    clearImportanceFeedback();
+    clearLearningProfile();
+    setFeedbackMap({});
+    setLearningProfile({
+      domainAdjustments: {},
+      tagAdjustments: {},
+      sampleCount: 0,
+    });
+  };
+
   const rightRail = (
     <div className="space-y-6">
       <WeeklyShifts
@@ -344,6 +404,7 @@ export function CommandCenterClient({
           onPreferredDomainToggle={togglePreferredDomain}
           onPreferredTagToggle={togglePreferredTag}
           onExcludedTagToggle={toggleExcludedTag}
+          onClearImportanceLearning={handleClearLearning}
         />
 
         <TopSignals
@@ -351,7 +412,11 @@ export function CommandCenterClient({
           activeTags={activeTags}
           personalizedView={personalizedView}
           scoreLookup={scoreLookup}
+          feedbackMap={feedbackMap}
+          learningProfile={learningProfile}
           onTagClick={toggleTag}
+          onImportanceChange={handleImportanceChange}
+          onImportanceReset={handleImportanceReset}
         />
 
         <div className="xl:hidden">
@@ -363,7 +428,11 @@ export function CommandCenterClient({
           activeTags={activeTags}
           personalizedView={personalizedView}
           scoreLookup={scoreLookup}
+          feedbackMap={feedbackMap}
+          learningProfile={learningProfile}
           onTagClick={toggleTag}
+          onImportanceChange={handleImportanceChange}
+          onImportanceReset={handleImportanceReset}
         />
       </div>
     </AppShell>

@@ -21,6 +21,7 @@ type FiltersBarProps = {
   onPreferredDomainToggle: (domain: ArticleDomain) => void;
   onPreferredTagToggle: (tag: string) => void;
   onExcludedTagToggle: (tag: string) => void;
+  onClearImportanceLearning: () => void;
 };
 
 const timeRanges: Array<{ label: string; value: "today" | "week" | "month" }> = [
@@ -58,13 +59,14 @@ export function FiltersBar({
   onPreferredDomainToggle,
   onPreferredTagToggle,
   onExcludedTagToggle,
+  onClearImportanceLearning,
 }: FiltersBarProps) {
   const visibleTags = availableTags.filter((tag) =>
     tag.toLowerCase().includes(tagQuery.trim().toLowerCase()),
   );
 
   return (
-    <section className="surface-card sticky top-4 z-20 p-4 sm:p-6">
+    <section className="surface-card p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-4">
         <div>
           <p className="section-kicker">Filters</p>
@@ -85,7 +87,8 @@ export function FiltersBar({
         </button>
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[auto_auto_minmax(0,1fr)]">
+      <div className="mt-4 space-y-4">
+        <div className="flex flex-wrap gap-x-8 gap-y-4">
         <div>
           <p className="section-kicker">Time Range</p>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -126,6 +129,7 @@ export function FiltersBar({
           </div>
         </div>
 
+        </div>
         <div>
           <div className="flex items-center justify-between gap-4">
             <p className="section-kicker">Tag Search</p>
@@ -196,7 +200,16 @@ export function FiltersBar({
         </div>
 
         <div>
-          <p className="section-kicker">Excluded Tags</p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="section-kicker">Excluded Tags</p>
+            <button
+              type="button"
+              onClick={onClearImportanceLearning}
+              className="text-xs font-medium text-sky-700 hover:text-sky-900"
+            >
+              Clear learned importance
+            </button>
+          </div>
           <div className="mt-3 flex flex-wrap gap-2">
             {availableTags.slice(0, 20).map((tag) => (
               <button

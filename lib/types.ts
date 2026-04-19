@@ -21,3 +21,14 @@ export type Article = {
   tags: string[];
   importance: 1 | 2 | 3 | 4 | 5;
 };
+
+export type ImportanceFeedback = {
+  articleId: string;
+  originalImportance: 1 | 2 | 3 | 4 | 5;
+  userImportance: 1 | 2 | 3 | 4 | 5;
+  updatedAt: string;
+};
+
+export type ArticleWithEffectiveImportance = Article & {
+  effectiveImportance?: 1 | 2 | 3 | 4 | 5;
+};

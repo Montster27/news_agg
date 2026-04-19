@@ -1,21 +1,31 @@
 "use client";
 
 import { useState } from "react";
-import { Article } from "@/lib/types";
+import { ImportanceEditor } from "@/components/ImportanceEditor";
 import { Tag } from "@/components/Tag";
+import { Article, ImportanceFeedback } from "@/lib/types";
 
 type ArticleCardProps = {
   article: Article;
   isHighlighted?: boolean;
   activeTags?: string[];
+  feedback?: ImportanceFeedback;
   onTagClick?: (tag: string) => void;
+  onImportanceChange?: (
+    article: Article,
+    userImportance: 1 | 2 | 3 | 4 | 5,
+  ) => void;
+  onImportanceReset?: (article: Article) => void;
 };
 
 export function ArticleCard({
   article,
   isHighlighted = false,
   activeTags = [],
+  feedback,
   onTagClick,
+  onImportanceChange,
+  onImportanceReset,
 }: ArticleCardProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -34,11 +44,12 @@ export function ArticleCard({
           </div>
           <h3 className="text-lg font-semibold text-ink">{article.headline}</h3>
         </div>
-        {article.importance ? (
-          <div className="rounded-full bg-mist px-3 py-1 text-sm font-semibold text-accent">
-            {article.importance}/5
-          </div>
-        ) : null}
+        <ImportanceEditor
+          article={article}
+          feedback={feedback}
+          onSetImportance={onImportanceChange}
+          onResetImportance={onImportanceReset}
+        />
       </div>
 
       {article.tags?.length ? (

@@ -1,6 +1,13 @@
 "use client";
 
 import { Article } from "@/lib/types";
+import type { ImportanceFeedback } from "@/lib/types";
+import type { ImportanceLearningProfile } from "@/lib/feedback";
+import {
+  getLearnedAdjustment,
+  getLearningExplanation,
+} from "@/lib/feedback";
+import { ImportanceEditor } from "@/components/ImportanceEditor";
 import { Tag } from "@/components/Tag";
 
 type TopSignalsProps = {
@@ -8,7 +15,14 @@ type TopSignalsProps = {
   activeTags: string[];
   personalizedView: boolean;
   scoreLookup?: Map<string, number>;
+  feedbackMap?: Record<string, ImportanceFeedback>;
+  learningProfile?: ImportanceLearningProfile;
   onTagClick: (tag: string) => void;
+  onImportanceChange: (
+    article: Article,
+    userImportance: 1 | 2 | 3 | 4 | 5,
+  ) => void;
+  onImportanceReset: (article: Article) => void;
 };
 
 export function TopSignals({
@@ -16,7 +30,11 @@ export function TopSignals({
   activeTags,
   personalizedView,
   scoreLookup,
+  feedbackMap = {},
+  learningProfile,
   onTagClick,
+  onImportanceChange,
+  onImportanceReset,
 }: TopSignalsProps) {
   return (
     <section className="surface-card p-4 sm:p-6">
@@ -49,11 +67,25 @@ export function TopSignals({
                     {article.headline}
                   </h3>
                 </div>
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-semibold text-slate-700">
-                  {personalizedView
-                    ? `${(scoreLookup?.get(article.id) ?? article.importance).toFixed(1)}`
-                    : `${article.importance}/5`}
-                </span>
+                <ImportanceEditor
+                  article={article}
+                  feedback={feedbackMap[article.id]}
+                  score={
+                    personalizedView
+                      ? (scoreLookup?.get(article.id) ?? article.importance)
+                      : undefined
+                  }
+                  learnedAdjustment={
+                    learningProfile ? getLearnedAdjustment(article, learningProfile) : 0
+                  }
+                  learningExplanation={
+                    personalizedView && learningProfile
+                      ? getLearningExplanation(article, learningProfile)
+                      : null
+                  }
+                  onSetImportance={onImportanceChange}
+                  onResetImportance={onImportanceReset}
+                />
               </div>
               <p className="mt-3 truncate text-sm text-slate-600">{article.summary}</p>
               <div className="mt-4 flex flex-wrap gap-2">
