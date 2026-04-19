@@ -9,14 +9,16 @@
     "dev": "next dev --experimental-https",
     "dev:web": "next dev --port 3000",
     "dev:web:desktop": "ELECTRON_RENDERER_MODE=desktop next dev --port 3000",
-    "electron:wait": "wait-on http://127.0.0.1:3000/api/health && electron-forge start",
+    "rebuild:node": "npm rebuild better-sqlite3",
+    "rebuild:electron": "electron-rebuild -f -w better-sqlite3",
+    "electron:wait": "wait-on http://127.0.0.1:3000/api/health && npm run rebuild:electron && electron-forge start",
     "dev:desktop": "concurrently -k -n web,electron -c blue,green \"npm:dev:web:desktop\" \"npm:electron:wait\"",
     "build": "next build",
     "start": "next start",
-    "package:desktop": "electron-forge package",
-    "make:desktop": "electron-forge make",
+    "package:desktop": "npm run rebuild:electron && electron-forge package",
+    "make:desktop": "npm run rebuild:electron && electron-forge make",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "npm run rebuild:node && vitest run"
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
