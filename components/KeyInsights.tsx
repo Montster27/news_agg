@@ -18,7 +18,7 @@ export function KeyInsights({
   onInsightClick,
 }: KeyInsightsProps) {
   return (
-    <section className="surface-card p-4 sm:p-6">
+    <section className="surface-card p-4">
       <div className="flex items-center justify-between gap-4 border-b border-slate-200 pb-4">
         <div>
           <p className="section-kicker">Structural Read</p>
@@ -38,7 +38,7 @@ export function KeyInsights({
               key={insight.title}
               type="button"
               onClick={() => onInsightClick(`${insight.title} ${insight.explanation}`)}
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition duration-200 hover:-translate-y-0.5 hover:border-sky-300 hover:bg-white hover:shadow-sm"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-left transition duration-200 hover:border-sky-300 hover:bg-white"
             >
               <div className="flex items-center justify-between gap-4">
                 <h3 className="text-base font-semibold text-slate-900">{insight.title}</h3>

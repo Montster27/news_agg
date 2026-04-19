@@ -1,10 +1,46 @@
-const { app, BrowserWindow, Menu, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, Notification, shell, powerMonitor } = require("electron");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { initDb, getDbPath, getUserDataPath, closeDb } = require("./db");
+const {
+  getArticles,
+  getTopSignals,
+} = require("./repositories/articlesRepo");
+const {
+  clearLearningProfile,
+  getImportanceFeedback,
+  getLastRefresh,
+  getLastRefreshError,
+  getLastRefreshStats,
+  getLearningProfile,
+  getPreferences,
+  saveImportanceFeedback,
+  savePreferences,
+} = require("./repositories/preferencesRepo");
+const {
+  getBrief,
+  getInsights,
+  getLongTermTrends,
+  getPatterns,
+} = require("./repositories/patternsRepo");
+const { createNotificationService } = require("./services/notificationService");
+const { createRefreshService } = require("./services/refreshService");
+const { createScheduler } = require("./services/scheduler");
+const {
+  createSnapshot,
+  exportSnapshot,
+  importSnapshot,
+} = require("./services/importExportService");
+const { createSearchService } = require("./search");
 
 const DEV_SERVER_URL = process.env.ELECTRON_RENDERER_URL ?? "http://127.0.0.1:3000";
 
 let mainWindow = null;
+let desktopDb = null;
+let notificationService = null;
+let refreshService = null;
+let scheduler = null;
+let searchService = null;
 
 function isLocalHttpUrl(value) {
   try {
@@ -76,6 +112,70 @@ async function exportPayload(payload, parentWindow) {
   return { success: true, path: result.filePath };
 }
 
+async function exportSnapshotDialog(parentWindow) {
+  const result = await dialog.showSaveDialog(parentWindow, {
+    title: "Export Local Data",
+    defaultPath: path.join(
+      app.getPath("documents"),
+      `tech-command-center-snapshot-${new Date().toISOString().slice(0, 10)}.json`,
+    ),
+    filters: [{ name: "JSON", extensions: ["json"] }],
+  });
+
+  if (result.canceled || !result.filePath) {
+    return { success: false, error: "Export canceled" };
+  }
+
+  return exportSnapshot(desktopDb, result.filePath);
+}
+
+async function importSnapshotDialog(parentWindow) {
+  const result = await dialog.showOpenDialog(parentWindow, {
+    title: "Import Local Data",
+    properties: ["openFile"],
+    filters: [{ name: "JSON", extensions: ["json"] }],
+  });
+
+  if (result.canceled || !result.filePaths[0]) {
+    return { success: false, error: "Import canceled" };
+  }
+
+  return importSnapshot(desktopDb, result.filePaths[0]);
+}
+
+function notifyRenderer(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+}
+
+function getPowerState() {
+  if (typeof powerMonitor?.isOnBatteryPower !== "function") {
+    return { source: "unknown", onBattery: false };
+  }
+
+  const onBattery = powerMonitor.isOnBatteryPower();
+  return {
+    source: onBattery ? "battery" : "external",
+    onBattery,
+  };
+}
+
+async function runRefreshFromMenu() {
+  try {
+    const result = await refreshService.runRefresh({ manual: true });
+    notifyRenderer("desktop:refreshComplete", result);
+  } catch (error) {
+    const result = {
+      success: false,
+      inserted: 0,
+      error: error instanceof Error ? error.message : "Unknown refresh error",
+    };
+    notifyRenderer("desktop:refreshComplete", result);
+    dialog.showErrorBox("Refresh failed", result.error);
+  }
+}
+
 function createMenu() {
   const template = [
     ...(process.platform === "darwin"
@@ -90,19 +190,49 @@ function createMenu() {
       label: "File",
       submenu: [
         {
-          label: "Export Current Data",
+          label: "Refresh Now",
+          accelerator: "CmdOrCtrl+R",
+          click: () => {
+            void runRefreshFromMenu();
+          },
+        },
+        { type: "separator" },
+        {
+          label: "Export Data",
           accelerator: "CmdOrCtrl+E",
           click: async () => {
-            await exportPayload(
-              {
-                exportedAt: new Date().toISOString(),
-                source: "application-menu",
-                note: "Renderer state export is handled by the in-app Export button.",
-              },
-              mainWindow,
-            ).catch((error) => {
+            await exportSnapshotDialog(mainWindow).catch((error) => {
               dialog.showErrorBox("Export failed", error.message);
             });
+          },
+        },
+        {
+          label: "Import Data",
+          accelerator: "CmdOrCtrl+I",
+          click: async () => {
+            const result = await importSnapshotDialog(mainWindow).catch((error) => ({
+              success: false,
+              error: error.message,
+            }));
+
+            notifyRenderer("desktop:importComplete", result);
+          },
+        },
+        {
+          label: "Toggle Notifications",
+          click: () => {
+            const current = getPreferences(desktopDb);
+            savePreferences(desktopDb, {
+              notificationsEnabled: !current.notificationsEnabled,
+            });
+            createMenu();
+            notifyRenderer("desktop:preferencesChanged", getPreferences(desktopDb));
+          },
+        },
+        {
+          label: "Open Data Folder",
+          click: () => {
+            void shell.openPath(getUserDataPath());
           },
         },
         { type: "separator" },
@@ -146,6 +276,13 @@ async function createWindow() {
     mainWindow = null;
   });
 
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWindow.webContents.on("will-navigate", (event, navigationUrl) => {
+    if (!isLocalHttpUrl(navigationUrl) && !navigationUrl.startsWith("file:")) {
+      event.preventDefault();
+    }
+  });
+
   await loadRenderer(mainWindow);
 }
 
@@ -153,6 +290,8 @@ ipcMain.handle("desktop:appInfo", () => ({
   name: app.getName(),
   version: app.getVersion(),
   platform: process.platform,
+  dataPath: getUserDataPath(),
+  dbPath: getDbPath(),
 }));
 
 ipcMain.handle("desktop:ping", () => "pong");
@@ -170,15 +309,174 @@ ipcMain.handle("desktop:exportData", async (event, payload) => {
   }
 });
 
+ipcMain.handle("desktop:data:getTopSignals", (_event, filters = {}) => {
+  return getTopSignals(desktopDb, filters);
+});
+
+ipcMain.handle("desktop:data:getArticles", (_event, filters = {}) => {
+  return getArticles(desktopDb, filters);
+});
+
+ipcMain.handle("desktop:data:getPatterns", (_event, filters = {}) => {
+  return getPatterns(desktopDb, filters);
+});
+
+ipcMain.handle("desktop:data:getBrief", (_event, week) => {
+  return getBrief(desktopDb, typeof week === "string" ? week : undefined);
+});
+
+ipcMain.handle("desktop:data:getInsights", (_event, week) => {
+  return getInsights(desktopDb, typeof week === "string" ? week : undefined);
+});
+
+ipcMain.handle("desktop:data:getLongTermTrends", (_event, filters = {}) => {
+  return getLongTermTrends(desktopDb, filters.weeks);
+});
+
+ipcMain.handle("desktop:data:getImportanceFeedback", () => {
+  return getImportanceFeedback(desktopDb);
+});
+
+ipcMain.handle("desktop:data:saveImportanceFeedback", (_event, payload) => {
+  try {
+    return saveImportanceFeedback(desktopDb, payload);
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Invalid importance feedback",
+    };
+  }
+});
+
+ipcMain.handle("desktop:data:clearLearningProfile", () => {
+  return clearLearningProfile(desktopDb);
+});
+
+ipcMain.handle("desktop:data:getPreferences", () => ({
+  ...getPreferences(desktopDb),
+  learningProfile: getLearningProfile(desktopDb),
+  appDataPath: getUserDataPath(),
+  dbPath: getDbPath(),
+  lastRefreshError: getLastRefreshError(desktopDb),
+  lastRefreshStats: getLastRefreshStats(desktopDb),
+}));
+
+ipcMain.handle("desktop:data:savePreferences", (_event, payload = {}) => {
+  try {
+    const preferences = savePreferences(desktopDb, payload);
+    scheduler?.start();
+    createMenu();
+    notifyRenderer("desktop:preferencesChanged", preferences);
+    return { success: true, preferences };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Invalid preferences",
+    };
+  }
+});
+
+ipcMain.handle("desktop:jobs:runRefreshNow", async () => {
+  try {
+    const result = await refreshService.runRefresh({ manual: true });
+    notifyRenderer("desktop:refreshComplete", result);
+    return result;
+  } catch (error) {
+    return {
+      success: false,
+      inserted: 0,
+      error: error instanceof Error ? error.message : "Unknown refresh error",
+    };
+  }
+});
+
+ipcMain.handle("desktop:jobs:getLastRefresh", () => getLastRefresh(desktopDb));
+
+ipcMain.handle("desktop:notifications:requestStatus", () => {
+  return notificationService.requestStatus();
+});
+
+ipcMain.handle("desktop:imports:importJson", async (event) => {
+  const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+  const result = await importSnapshotDialog(parentWindow).catch((error) => ({
+    success: false,
+    error: error instanceof Error ? error.message : "Unknown import error",
+  }));
+  notifyRenderer("desktop:importComplete", result);
+  return result;
+});
+
+ipcMain.handle("desktop:exports:exportJson", async (event) => {
+  const parentWindow = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+  return exportSnapshotDialog(parentWindow).catch((error) => ({
+    success: false,
+    error: error instanceof Error ? error.message : "Unknown export error",
+  }));
+});
+
+ipcMain.handle("desktop:exports:getSnapshot", () => createSnapshot(desktopDb));
+
+ipcMain.handle("desktop:search:query", (_event, input = {}) => {
+  return searchService.query(input);
+});
+
+ipcMain.handle("desktop:search:relatedArticles", (_event, articleId) => {
+  return searchService.relatedArticles(typeof articleId === "string" ? articleId : "");
+});
+
+ipcMain.handle("desktop:search:recent", () => {
+  return searchService.recent();
+});
+
+ipcMain.handle("desktop:search:saveSearch", (_event, payload = {}) => {
+  return searchService.saveSearch(payload);
+});
+
+ipcMain.handle("desktop:search:savedSearches", () => {
+  return searchService.savedSearches();
+});
+
+ipcMain.handle("desktop:search:deleteSavedSearch", (_event, id) => {
+  return searchService.deleteSavedSearch(id);
+});
+
+ipcMain.handle("desktop:search:rebuildIndex", () => {
+  return searchService.rebuildIndex();
+});
+
+ipcMain.handle("desktop:search:stats", () => {
+  return searchService.stats();
+});
+
 app.whenReady().then(async () => {
+  desktopDb = initDb(app);
+  searchService = createSearchService(desktopDb);
+  notificationService = createNotificationService(Notification);
+  refreshService = createRefreshService({
+    db: desktopDb,
+    notificationService,
+    getPowerState,
+    onComplete: (result) => notifyRenderer("desktop:refreshComplete", result),
+  });
+  scheduler = createScheduler({
+    refreshService,
+    getIntervalMinutes: () => getPreferences(desktopDb).refreshIntervalMinutes,
+  });
   createMenu();
   await createWindow();
+  scheduler.start();
+  scheduler.runAfterDelay(2500);
 
   app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       await createWindow();
     }
   });
+});
+
+app.on("before-quit", () => {
+  scheduler?.stop();
+  closeDb();
 });
 
 app.on("window-all-closed", () => {

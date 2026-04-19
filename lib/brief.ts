@@ -225,7 +225,7 @@ Return JSON only.`;
     return brief;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown brief generation error";
-    console.error(`[brief] generateWeeklyBrief failed: ${message}`);
+    console.warn(`[brief] generateWeeklyBrief failed: ${message}`);
     const fallback = fallbackBrief(patterns);
     setStoredBrief(storeKey, fallback, ONE_DAY);
     await saveBriefToDb(currentWeekFromArticles(sortedArticles), fallback);

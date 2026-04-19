@@ -317,7 +317,7 @@ Return JSON only.`;
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown insight generation error";
-    console.error(`[insights] generateInsightReport failed: ${message}`);
+    console.warn(`[insights] generateInsightReport failed: ${message}`);
     const result = {
       insights: fallback,
       inflections,

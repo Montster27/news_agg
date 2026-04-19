@@ -10,10 +10,10 @@ type AppShellProps = {
 export function AppShell({ children, aside, activePath }: AppShellProps) {
   return (
     <main className="mx-auto max-w-[1600px] px-4 py-4 sm:px-6 sm:py-6">
-      <div className="grid gap-6 lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,1fr)_320px]">
+      <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_320px]">
         <SidebarNav activePath={activePath} />
         <div className="min-w-0">{children}</div>
-        {aside ? <div className="hidden xl:block">{aside}</div> : null}
+        {aside ? <div className="hidden xl:sticky xl:top-6 xl:block xl:self-start">{aside}</div> : null}
       </div>
     </main>
   );

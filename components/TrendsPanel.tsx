@@ -51,8 +51,8 @@ export function TrendsPanel({
   onTrendClick,
 }: TrendsPanelProps) {
   return (
-    <div className="space-y-6">
-      <section className="surface-card p-4 sm:p-6">
+    <div className="space-y-4">
+      <section className="surface-card p-4">
         <div className="flex items-center justify-between gap-4 border-b border-slate-200 pb-4">
           <div>
             <p className="section-kicker">Where Things Are Going</p>
@@ -70,7 +70,7 @@ export function TrendsPanel({
                 key={trend.tag}
                 type="button"
                 onClick={() => onTrendClick(trend.tag)}
-                className={`flex w-full items-center justify-between rounded-2xl border px-4 py-4 text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-sm ${
+                className={`flex w-full items-center justify-between rounded-xl border px-3 py-3 text-left transition duration-200 ${
                   activeTags.includes(trend.tag)
                     ? "border-sky-300 bg-sky-50"
                     : "border-slate-200 bg-slate-50 hover:border-sky-300 hover:bg-white"
@@ -100,7 +100,7 @@ export function TrendsPanel({
         )}
       </section>
 
-      <section className="surface-card p-4 sm:p-6">
+      <section className="surface-card p-4">
         <div className="flex items-center justify-between gap-4 border-b border-slate-200 pb-4">
           <div>
             <p className="section-kicker">Six To Eight Weeks</p>
@@ -118,7 +118,7 @@ export function TrendsPanel({
                 key={trend.tag}
                 type="button"
                 onClick={() => onTrendClick(trend.tag)}
-                className={`w-full rounded-2xl border px-4 py-4 text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-sm ${
+                className={`w-full rounded-xl border px-3 py-3 text-left transition duration-200 ${
                   activeTags.includes(trend.tag)
                     ? "border-sky-300 bg-sky-50"
                     : "border-slate-200 bg-slate-50 hover:border-sky-300 hover:bg-white"

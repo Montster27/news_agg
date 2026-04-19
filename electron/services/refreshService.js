@@ -1,0 +1,435 @@
+const Parser = require("rss-parser");
+const { upsertArticles, getArticles } = require("../repositories/articlesRepo");
+const {
+  createBrief,
+  createInsights,
+  formatWeek,
+  getBrief,
+  saveBrief,
+  saveInsights,
+  savePatternSnapshot,
+  getPatterns,
+} = require("../repositories/patternsRepo");
+const {
+  getPreferences,
+  setLastRefresh,
+  setLastRefreshError,
+  setLastRefreshStats,
+} = require("../repositories/preferencesRepo");
+const { createResourceMonitor } = require("./resourceMonitor");
+const { sources } = require("./sources");
+
+const parser = new Parser();
+const MAX_ARTICLES_PER_SOURCE = 5;
+const MAX_FEED_BYTES = 1_500_000;
+const MAX_CONCURRENT_FEEDS = 3;
+const FEED_BATCH_PAUSE_MS = 150;
+
+function stripHtml(value) {
+  return String(value ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function createSummary(item) {
+  const cleaned = stripHtml(item.contentSnippet || item.summary || item.content || "");
+  return cleaned ? cleaned.slice(0, 280) : "Summary unavailable for this feed item.";
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatMemoryState(memoryState) {
+  if (!memoryState) {
+    return "memory pressure";
+  }
+
+  const details = [
+    `free ${memoryState.systemFreeMemoryMb} MB`,
+    `RSS ${memoryState.rssMb} MB`,
+  ];
+
+  return `${memoryState.reasons?.join(", ") || "memory pressure"} (${details.join(", ")})`;
+}
+
+async function readResponseTextWithLimit(response, maxBytes = MAX_FEED_BYTES) {
+  const contentLength = Number(response.headers.get("content-length"));
+
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new Error(`Feed is too large (${contentLength} bytes, limit ${maxBytes})`);
+  }
+
+  if (!response.body?.getReader) {
+    const text = await response.text();
+    const byteLength = Buffer.byteLength(text, "utf8");
+
+    if (byteLength > maxBytes) {
+      throw new Error(`Feed is too large (${byteLength} bytes, limit ${maxBytes})`);
+    }
+
+    return text;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytesRead = 0;
+  let text = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    bytesRead += value.byteLength;
+
+    if (bytesRead > maxBytes) {
+      await reader.cancel();
+      throw new Error(`Feed is too large (${bytesRead} bytes, limit ${maxBytes})`);
+    }
+
+    text += decoder.decode(value, { stream: true });
+  }
+
+  return text + decoder.decode();
+}
+
+function inferTags(text) {
+  const normalized = text.toLowerCase();
+  const keywords = [
+    ["ai_infrastructure", ["ai infrastructure", "inference", "model", "gpu cluster"]],
+    ["chips", ["semiconductor", "chip", "gpu", "memory", "wafer"]],
+    ["energy_constraint", ["power", "energy", "grid", "electricity"]],
+    ["data_centers", ["data center", "datacenter", "cloud infrastructure"]],
+    ["frontier_models", ["frontier model", "reasoning model", "agent"]],
+    ["robotics", ["robot", "robotics", "automation"]],
+    ["biotech", ["biotech", "biology", "drug discovery", "genomics"]],
+    ["security", ["security", "cyber", "vulnerability"]],
+    ["regulation", ["regulation", "policy", "antitrust", "lawmakers"]],
+  ];
+  const tags = keywords
+    .filter(([, needles]) => needles.some((needle) => normalized.includes(needle)))
+    .map(([tag]) => tag);
+
+  return tags.length ? tags : ["tech_monitoring"];
+}
+
+function scoreArticle(article, preferences) {
+  const preferredTags = preferences.preferredTags ?? ["ai_infrastructure", "energy_constraint"];
+  const preferredDomains = preferences.preferredDomains ?? ["AI", "Chips"];
+  const tagBoost = article.tags.filter((tag) => preferredTags.includes(tag)).length * 1.2;
+  const domainBoost = preferredDomains.includes(article.domain) ? 1 : 0;
+  return Number((article.importance + tagBoost + domainBoost).toFixed(2));
+}
+
+function inferImportance(article) {
+  const text = `${article.headline} ${article.summary}`.toLowerCase();
+  let importance = 3;
+
+  if (/(breakthrough|launches|raises|lawsuit|ban|shutdown|shortage|security|vulnerability|earnings|acquisition)/.test(text)) {
+    importance += 1;
+  }
+
+  if (/(openai|nvidia|google|microsoft|apple|meta|amazon|tsmc|asml|deepmind)/.test(text)) {
+    importance += 1;
+  }
+
+  return Math.max(1, Math.min(5, importance));
+}
+
+function normalizeItem(source, item, preferences) {
+  const headline = item.title?.trim();
+  const url = item.link?.trim();
+
+  if (!headline || !url) {
+    return null;
+  }
+
+  const rawDate = item.isoDate || item.pubDate;
+  const parsedDate = rawDate ? new Date(rawDate) : new Date();
+  const processedAt = new Date().toISOString();
+  const summary = createSummary(item);
+  const tags = inferTags(`${headline} ${summary}`);
+  const article = {
+    id: `${source.name}-${headline}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+    headline,
+    summary,
+    source: source.name,
+    url,
+    published_at: parsedDate.toISOString(),
+    processed_at: processedAt,
+    date: parsedDate.toISOString().slice(0, 10),
+    week: formatWeek(parsedDate),
+    domain: source.category,
+    tags,
+    raw_payload: {
+      guid: item.guid,
+      categories: item.categories,
+      creator: item.creator,
+    },
+  };
+
+  article.importance = inferImportance(article);
+  article.personalized_score = scoreArticle(article, preferences);
+  return article;
+}
+
+async function fetchFeed(source, preferences, { maxFeedBytes = MAX_FEED_BYTES } = {}) {
+  try {
+    const response = await fetch(source.url, {
+      headers: {
+        Accept: "application/rss+xml, application/xml, text/xml",
+        "User-Agent": "tech-command-center-desktop/2.0",
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!response.ok) {
+      return { articles: [], error: `${source.name} returned ${response.status}` };
+    }
+
+    const xml = await readResponseTextWithLimit(response, maxFeedBytes);
+    const feed = await parser.parseString(xml);
+    const articles = (feed.items ?? [])
+      .slice(0, MAX_ARTICLES_PER_SOURCE)
+      .map((item) => normalizeItem(source, item, preferences))
+      .filter(Boolean);
+
+    return { articles, error: null };
+  } catch (error) {
+    return {
+      articles: [],
+      error: `${source.name}: ${error instanceof Error ? error.message : "Unknown error"}`,
+    };
+  }
+}
+
+function dedupeByUrl(articles) {
+  const seen = new Set();
+
+  return articles.filter((article) => {
+    const key = article.url || article.headline.toLowerCase();
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+async function fetchAllFeeds(preferences, {
+  sourceList = sources,
+  maxConcurrentFeeds = MAX_CONCURRENT_FEEDS,
+  maxFeedBytes = MAX_FEED_BYTES,
+  batchPauseMs = FEED_BATCH_PAUSE_MS,
+  resourceMonitor,
+  fetchFeedFn = fetchFeed,
+} = {}) {
+  const results = [];
+  const concurrency = Math.max(1, Number(maxConcurrentFeeds) || 1);
+
+  for (let index = 0; index < sourceList.length; index += concurrency) {
+    const memoryState = resourceMonitor?.getMemoryState?.();
+
+    if (memoryState?.constrained) {
+      const message = `Refresh stopped early because ${formatMemoryState(memoryState)}`;
+      results.push(
+        ...sourceList.slice(index).map((source) => ({
+          articles: [],
+          error: `${source.name}: ${message}`,
+        })),
+      );
+      break;
+    }
+
+    const batch = sourceList.slice(index, index + concurrency);
+    results.push(
+      ...(await Promise.all(
+        batch.map((source) => fetchFeedFn(source, preferences, { maxFeedBytes })),
+      )),
+    );
+
+    if (batchPauseMs > 0 && index + concurrency < sourceList.length) {
+      await sleep(batchPauseMs);
+    }
+  }
+
+  return results;
+}
+
+function createRefreshService({
+  db,
+  notificationService,
+  onComplete,
+  fetchAllFeeds: fetchAllFeedsOverride,
+  getPowerState,
+  resourceMonitor = createResourceMonitor(),
+  shouldSuspendRefresh = (_options, powerState) => Boolean(powerState?.onBattery),
+} = {}) {
+  let runningPromise = null;
+
+  async function runRefresh(options = {}) {
+    if (runningPromise) {
+      return {
+        success: false,
+        skipped: true,
+        skipReason: "running",
+        inserted: 0,
+        updated: 0,
+        incoming: 0,
+        error: "Refresh already running",
+      };
+    }
+
+    runningPromise = (async () => {
+      const trigger = options.manual ? "manual" : options.scheduled ? "scheduled" : "launch";
+      const powerState = getPowerState?.() ?? { source: "unknown", onBattery: false };
+      const startedAt = new Date().toISOString();
+
+      if (!options.manual && shouldSuspendRefresh?.(options, powerState)) {
+        const skippedAt = new Date().toISOString();
+        const result = {
+          success: false,
+          skipped: true,
+          skipReason: "battery",
+          inserted: 0,
+          updated: 0,
+          incoming: 0,
+          fetchedAt: skippedAt,
+          startedAt,
+          completedAt: skippedAt,
+          trigger,
+          power: {
+            ...powerState,
+            suspended: true,
+          },
+          error: "Auto-refresh paused while this computer is on battery power",
+        };
+        setLastRefreshStats(db, result);
+        return result;
+      }
+
+      const memoryState = resourceMonitor?.getMemoryState?.();
+
+      if (memoryState?.constrained) {
+        const skippedAt = new Date().toISOString();
+        const result = {
+          success: false,
+          skipped: true,
+          skipReason: "memory",
+          inserted: 0,
+          updated: 0,
+          incoming: 0,
+          fetchedAt: skippedAt,
+          startedAt,
+          completedAt: skippedAt,
+          trigger,
+          power: powerState,
+          memory: memoryState,
+          error: `Refresh paused because ${formatMemoryState(memoryState)}`,
+        };
+        setLastRefreshStats(db, result);
+        return result;
+      }
+
+      const resourceSample = resourceMonitor?.start?.();
+
+      function complete(result) {
+        const completedAt = new Date().toISOString();
+        const nextResult = {
+          ...result,
+          incoming: result.incoming ?? 0,
+          fetchedAt: result.fetchedAt ?? completedAt,
+          startedAt,
+          completedAt,
+          trigger,
+          power: result.power ?? powerState,
+          resourceImpact: resourceMonitor?.finish?.(resourceSample) ?? null,
+        };
+        setLastRefreshStats(db, nextResult);
+        return nextResult;
+      }
+
+      const preferences = getPreferences(db);
+      const settled = await (fetchAllFeedsOverride ?? fetchAllFeeds)(preferences, {
+        resourceMonitor,
+      });
+      const articles = dedupeByUrl(settled.flatMap((result) => result.articles))
+        .sort((left, right) => new Date(right.published_at).getTime() - new Date(left.published_at).getTime())
+        .slice(0, 60);
+      const errors = settled.map((result) => result.error).filter(Boolean);
+
+      if (!articles.length && errors.length) {
+        const message = `Refresh failed: ${errors.slice(0, 3).join("; ")}`;
+        setLastRefreshError(db, message);
+        return complete({
+          success: false,
+          inserted: 0,
+          updated: 0,
+          incoming: articles.length,
+          error: message,
+        });
+      }
+
+      const result = upsertArticles(db, articles);
+      const latestArticles = getArticles(db, { limit: 500 });
+      const patterns = getPatterns(db, { limit: 500 });
+      const week = formatWeek(new Date());
+      savePatternSnapshot(db, patterns, week);
+
+      const brief = getBrief(db, week) ?? createBrief(patterns, latestArticles);
+      saveBrief(db, week, brief);
+
+      const insights = createInsights(patterns, latestArticles);
+      saveInsights(db, week, insights);
+
+      const insertedArticles = latestArticles.filter((article) =>
+        result.insertedIds.includes(article.id),
+      );
+      const notificationCount = notificationService
+        ? notificationService.notifyImportantArticles(insertedArticles, preferences)
+        : 0;
+      const refreshedAt = new Date().toISOString();
+      setLastRefresh(db, refreshedAt);
+      setLastRefreshError(db, null);
+
+      return complete({
+        success: true,
+        inserted: result.inserted,
+        updated: result.updated,
+        incoming: articles.length,
+        notificationCount,
+        fetchedAt: refreshedAt,
+        warning: errors.length ? errors.slice(0, 3).join("; ") : undefined,
+        manual: Boolean(options.manual),
+      });
+    })();
+
+    try {
+      const result = await runningPromise;
+      onComplete?.(result);
+      return result;
+    } finally {
+      runningPromise = null;
+    }
+  }
+
+  function isRunning() {
+    return Boolean(runningPromise);
+  }
+
+  return {
+    isRunning,
+    runRefresh,
+  };
+}
+
+module.exports = {
+  createRefreshService,
+  fetchAllFeeds,
+  fetchFeed,
+  inferTags,
+  normalizeItem,
+};

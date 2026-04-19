@@ -5,6 +5,7 @@ import { Article, ArticleDomain } from "@/lib/types";
 
 const ONE_HOUR = 60 * 60 * 1000;
 const AI_FAILURE_COOLDOWN = 15 * 60 * 1000;
+const MAX_PROCESSED_CACHE_ENTRIES = 300;
 const GENERIC_TAGS = new Set(["ai", "technology", "startup", "news", "tech"]);
 const VALID_DOMAINS: ArticleDomain[] = [
   "AI",
@@ -87,6 +88,31 @@ function cacheKey(article: ArticleInput) {
   return `${article.source ?? "unknown"}::${article.headline}`.toLowerCase();
 }
 
+function pruneProcessedCache() {
+  const now = Date.now();
+
+  for (const [key, entry] of processedCache) {
+    if (entry.expiresAt <= now) {
+      processedCache.delete(key);
+    }
+  }
+
+  while (processedCache.size > MAX_PROCESSED_CACHE_ENTRIES) {
+    const oldestKey = processedCache.keys().next().value;
+
+    if (!oldestKey) {
+      break;
+    }
+
+    processedCache.delete(oldestKey);
+  }
+}
+
+function setProcessedCache(key: string, value: ProcessedArticle) {
+  processedCache.set(key, { value, expiresAt: Date.now() + ONE_HOUR });
+  pruneProcessedCache();
+}
+
 function sentenceClamp(text: string) {
   const cleaned = text.replace(/\s+/g, " ").trim();
 
@@ -161,6 +187,7 @@ export async function processArticle(article: ArticleInput): Promise<ProcessedAr
 }
 
 export async function processArticlesInBatches(articles: Article[]) {
+  pruneProcessedCache();
   const processed = [...articles];
 
   for (let index = 0; index < processed.length; index += 6) {
@@ -176,7 +203,7 @@ export async function processArticlesInBatches(articles: Article[]) {
       if (!client || Date.now() < aiDisabledUntil) {
         for (const article of uncached) {
           const key = cacheKey(article);
-          processedCache.set(key, { value: fallbackArticle(article), expiresAt: Date.now() + ONE_HOUR });
+          setProcessedCache(key, fallbackArticle(article));
         }
       } else {
         try {
@@ -252,7 +279,7 @@ export async function processArticlesInBatches(articles: Article[]) {
               processedArticle = fallbackArticle(article);
             }
 
-            processedCache.set(key, { value: processedArticle, expiresAt: Date.now() + ONE_HOUR });
+            setProcessedCache(key, processedArticle);
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unknown AI error";
@@ -268,7 +295,7 @@ export async function processArticlesInBatches(articles: Article[]) {
 
           for (const article of uncached) {
             const key = cacheKey(article);
-            processedCache.set(key, { value: fallbackArticle(article), expiresAt: Date.now() + ONE_HOUR });
+            setProcessedCache(key, fallbackArticle(article));
           }
         }
       }

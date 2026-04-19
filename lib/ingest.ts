@@ -9,6 +9,9 @@ const parser = new Parser();
 const ONE_HOUR = 60 * 60 * 1000;
 const MAX_ARTICLES_PER_SOURCE = 5;
 const MAX_DASHBOARD_ARTICLES = 30;
+const MAX_CONCURRENT_FEEDS = 3;
+const MAX_FEED_BYTES = 1_500_000;
+const FEED_BATCH_PAUSE_MS = 150;
 
 type ArticleCache = {
   articles: Article[];
@@ -16,6 +19,7 @@ type ArticleCache = {
 };
 
 let articleCache: ArticleCache | null = null;
+let ingestPromise: Promise<ArticleCache> | null = null;
 
 export function formatWeek(value: Date) {
   const utcDate = new Date(Date.UTC(value.getFullYear(), value.getMonth(), value.getDate()));
@@ -43,6 +47,56 @@ function createSummary(item: {
   }
 
   return cleaned.slice(0, 280);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function readResponseTextWithLimit(
+  response: Response,
+  maxBytes = MAX_FEED_BYTES,
+) {
+  const contentLength = Number(response.headers.get("content-length"));
+
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new Error(`Feed is too large (${contentLength} bytes, limit ${maxBytes})`);
+  }
+
+  if (!response.body) {
+    const text = await response.text();
+    const byteLength = new TextEncoder().encode(text).byteLength;
+
+    if (byteLength > maxBytes) {
+      throw new Error(`Feed is too large (${byteLength} bytes, limit ${maxBytes})`);
+    }
+
+    return text;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytesRead = 0;
+  let text = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    bytesRead += value.byteLength;
+
+    if (bytesRead > maxBytes) {
+      await reader.cancel();
+      throw new Error(`Feed is too large (${bytesRead} bytes, limit ${maxBytes})`);
+    }
+
+    text += decoder.decode(value, { stream: true });
+  }
+
+  return text + decoder.decode();
 }
 
 function normalizeItem(source: RssSource, item: Parser.Item): Article | null {
@@ -85,18 +139,18 @@ async function fetchFeed(source: RssSource) {
     });
 
     if (!response.ok) {
-      console.error(`[rss] ${source.name} failed with status ${response.status}`);
+      console.warn(`[rss] ${source.name} failed with status ${response.status}`);
       return [];
     }
 
-    const xml = await response.text();
+    const xml = await readResponseTextWithLimit(response);
     let feed: Parser.Output<Parser.Item>;
 
     try {
       feed = await parser.parseString(xml);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown parse error";
-      console.error(`[rss] ${source.name} parse failed: ${message}`);
+      console.warn(`[rss] ${source.name} parse failed: ${message}`);
       return [];
     }
 
@@ -106,7 +160,7 @@ async function fetchFeed(source: RssSource) {
       .filter((article): article is Article => article !== null);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown fetch error";
-    console.error(`[rss] ${source.name} failed: ${message}`);
+    console.warn(`[rss] ${source.name} failed: ${message}`);
     return [];
   }
 }
@@ -126,15 +180,23 @@ function dedupeArticles(articles: Article[]) {
   });
 }
 
-export async function ingestFeeds() {
-  if (
-    articleCache &&
-    Date.now() - new Date(articleCache.fetchedAt).getTime() < ONE_HOUR
-  ) {
-    return articleCache;
+async function fetchFeedsWithThrottle() {
+  const results: Article[][] = [];
+
+  for (let index = 0; index < sources.length; index += MAX_CONCURRENT_FEEDS) {
+    const batch = sources.slice(index, index + MAX_CONCURRENT_FEEDS);
+    results.push(...(await Promise.all(batch.map((source) => fetchFeed(source)))));
+
+    if (index + MAX_CONCURRENT_FEEDS < sources.length) {
+      await sleep(FEED_BATCH_PAUSE_MS);
+    }
   }
 
-  const settled = await Promise.all(sources.map((source) => fetchFeed(source)));
+  return results;
+}
+
+async function refreshFeeds() {
+  const settled = await fetchFeedsWithThrottle();
   const deduped = dedupeArticles(settled.flat())
     .sort((left, right) => {
       return new Date(right.date).getTime() - new Date(left.date).getTime();
@@ -151,6 +213,27 @@ export async function ingestFeeds() {
   await saveArticlesToDb(nextCache.articles);
   articleCache = nextCache;
   return nextCache;
+}
+
+export async function ingestFeeds() {
+  if (
+    articleCache &&
+    Date.now() - new Date(articleCache.fetchedAt).getTime() < ONE_HOUR
+  ) {
+    return articleCache;
+  }
+
+  if (ingestPromise) {
+    return ingestPromise;
+  }
+
+  ingestPromise = refreshFeeds();
+
+  try {
+    return await ingestPromise;
+  } finally {
+    ingestPromise = null;
+  }
 }
 
 export function getCachedArticles() {

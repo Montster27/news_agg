@@ -42,11 +42,11 @@ a {
 
 @layer components {
   .surface-card {
-    @apply rounded-2xl border border-slate-200 bg-white p-6 shadow-sm;
+    @apply rounded-xl border border-slate-200 bg-white p-6 shadow-sm;
   }
 
   .surface-muted {
-    @apply rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm;
+    @apply rounded-xl border border-slate-200 bg-slate-50 p-4 shadow-sm;
   }
 
   .section-title {
@@ -54,11 +54,11 @@ a {
   }
 
   .section-kicker {
-    @apply text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500;
+    @apply text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500;
   }
 
   .tag-pill {
-    @apply rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-200;
+    @apply rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-200;
   }
 
   .tag-pill-active {

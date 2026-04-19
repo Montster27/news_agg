@@ -8,8 +8,9 @@
   "scripts": {
     "dev": "next dev --experimental-https",
     "dev:web": "next dev --port 3000",
-    "electron:wait": "wait-on http://127.0.0.1:3000 && electron-forge start",
-    "dev:desktop": "concurrently -k -n web,electron -c blue,green \"npm:dev:web\" \"npm:electron:wait\"",
+    "dev:web:desktop": "ELECTRON_RENDERER_MODE=desktop next dev --port 3000",
+    "electron:wait": "wait-on http://127.0.0.1:3000/api/health && electron-forge start",
+    "dev:desktop": "concurrently -k -n web,electron -c blue,green \"npm:dev:web:desktop\" \"npm:electron:wait\"",
     "build": "next build",
     "start": "next start",
     "package:desktop": "electron-forge package",
@@ -18,6 +19,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "better-sqlite3": "^12.9.0",
     "next": "^16.2.4",
     "openai": "^6.34.0",
     "pg": "^8.20.0",

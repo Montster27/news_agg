@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   getEffectiveImportance,
   loadImportanceFeedback,
@@ -34,15 +34,19 @@ export function ImportanceEditor({
   onResetImportance,
 }: ImportanceEditorProps) {
   const [editing, setEditing] = useState(false);
-  const [localFeedback, setLocalFeedback] = useState<ImportanceFeedback | undefined>(() =>
-    loadImportanceFeedback()[article.id],
-  );
+  const [localFeedback, setLocalFeedback] = useState<ImportanceFeedback | undefined>();
   const activeFeedback = feedback ?? localFeedback;
   const effectiveImportance = getEffectiveImportance(
     article,
     activeFeedback ? { [article.id]: activeFeedback } : {},
   );
   const hasOverride = Boolean(activeFeedback);
+
+  useEffect(() => {
+    if (!feedback) {
+      setLocalFeedback(loadImportanceFeedback()[article.id]);
+    }
+  }, [article.id, feedback]);
 
   const handleSet = (userImportance: 1 | 2 | 3 | 4 | 5) => {
     if (onSetImportance) {
@@ -69,8 +73,8 @@ export function ImportanceEditor({
   };
 
   return (
-    <div className="shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-2 text-right">
-      <div className="flex items-center justify-end gap-2">
+    <div className="w-full shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-2 text-left sm:w-32 sm:text-right">
+      <div className="flex items-center justify-between gap-2 sm:justify-end">
         <span
           className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
             hasOverride
@@ -97,7 +101,7 @@ export function ImportanceEditor({
       ) : null}
 
       {hasOverride ? (
-        <div className="mt-1 flex items-center justify-end gap-2 text-[11px] text-slate-500">
+        <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-slate-500 sm:justify-end">
           <span>
             Original {article.importance}/5
           </span>
@@ -113,7 +117,7 @@ export function ImportanceEditor({
 
       {editing ? (
         <div
-          className="mt-2 flex justify-end gap-1"
+          className="mt-2 flex justify-start gap-1 sm:justify-end"
           role="radiogroup"
           aria-label={`${article.headline} importance`}
         >

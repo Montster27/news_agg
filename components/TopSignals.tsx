@@ -50,56 +50,69 @@ export function TopSignals({
 
       {articles.length ? (
         <div className="mt-6 grid gap-4 xl:grid-cols-2">
-          {articles.map((article) => (
-            <article
-              key={article.id}
-              className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">
-                      {article.domain}
-                    </span>
-                    {article.source ? <span>{article.source}</span> : null}
+          {articles.map((article) => {
+            const visibleTags = article.tags.slice(0, 5);
+            const hiddenTagCount = article.tags.length - visibleTags.length;
+
+            return (
+              <article
+                key={article.id}
+                className="group rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition duration-200 hover:border-sky-200 hover:shadow-md sm:p-5"
+              >
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-800">
+                        {article.domain}
+                      </span>
+                      {article.source ? <span>{article.source}</span> : null}
+                      <span>{article.date}</span>
+                    </div>
+                    <h3 className="mt-3 text-lg font-semibold leading-7 text-slate-950">
+                      {article.headline}
+                    </h3>
+                    <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">
+                      {article.summary}
+                    </p>
+                    {visibleTags.length ? (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {visibleTags.map((tag) => (
+                          <Tag
+                            key={tag}
+                            label={tag}
+                            active={activeTags.includes(tag)}
+                            onClick={onTagClick}
+                          />
+                        ))}
+                        {hiddenTagCount > 0 ? (
+                          <span className="tag-pill">+{hiddenTagCount}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
-                  <h3 className="mt-3 text-xl font-semibold leading-7 text-slate-900">
-                    {article.headline}
-                  </h3>
-                </div>
-                <ImportanceEditor
-                  article={article}
-                  feedback={feedbackMap[article.id]}
-                  score={
-                    personalizedView
-                      ? (scoreLookup?.get(article.id) ?? article.importance)
-                      : undefined
-                  }
-                  learnedAdjustment={
-                    learningProfile ? getLearnedAdjustment(article, learningProfile) : 0
-                  }
-                  learningExplanation={
-                    personalizedView && learningProfile
-                      ? getLearningExplanation(article, learningProfile)
-                      : null
-                  }
-                  onSetImportance={onImportanceChange}
-                  onResetImportance={onImportanceReset}
-                />
-              </div>
-              <p className="mt-3 truncate text-sm text-slate-600">{article.summary}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                {article.tags.map((tag) => (
-                  <Tag
-                    key={tag}
-                    label={tag}
-                    active={activeTags.includes(tag)}
-                    onClick={onTagClick}
+                  <ImportanceEditor
+                    article={article}
+                    feedback={feedbackMap[article.id]}
+                    score={
+                      personalizedView
+                        ? (scoreLookup?.get(article.id) ?? article.importance)
+                        : undefined
+                    }
+                    learnedAdjustment={
+                      learningProfile ? getLearnedAdjustment(article, learningProfile) : 0
+                    }
+                    learningExplanation={
+                      personalizedView && learningProfile
+                        ? getLearningExplanation(article, learningProfile)
+                        : null
+                    }
+                    onSetImportance={onImportanceChange}
+                    onResetImportance={onImportanceReset}
                   />
-                ))}
-              </div>
-            </article>
-          ))}
+                </div>
+              </article>
+            );
+          })}
         </div>
       ) : (
         <div className="surface-muted mt-6 border-dashed text-sm text-slate-500">
