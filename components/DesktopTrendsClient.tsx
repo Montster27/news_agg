@@ -1,19 +1,9 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { DesktopTrendsClient } from "@/components/DesktopTrendsClient";
 import type { ArticleDomain } from "@/lib/types";
-
-export const dynamic = "force-dynamic";
-
-const domains: Array<ArticleDomain | "All"> = [
-  "All",
-  "AI",
-  "Chips",
-  "Infra",
-  "Bio",
-  "Energy",
-  "Macro",
-];
 
 type TrendPoint = {
   week: string;
@@ -26,6 +16,23 @@ type LongTermTrend = {
   delta: number;
   average: number;
 };
+
+type TrendData = {
+  rising: LongTermTrend[];
+  declining: LongTermTrend[];
+  stable: LongTermTrend[];
+  available: boolean;
+};
+
+const domains: Array<ArticleDomain | "All"> = [
+  "All",
+  "AI",
+  "Chips",
+  "Infra",
+  "Bio",
+  "Energy",
+  "Macro",
+];
 
 function Sparkline({ points }: { points: TrendPoint[] }) {
   const max = Math.max(...points.map((point) => point.count), 1);
@@ -86,23 +93,50 @@ function TrendSection({
   );
 }
 
-export default async function TrendsPage({
-  searchParams,
-}: {
-  searchParams?: Promise<{ domain?: string }>;
-}) {
-  if (process.env.ELECTRON_RENDERER_MODE === "desktop") {
-    return <DesktopTrendsClient />;
-  }
+const emptyTrendData: TrendData = {
+  rising: [],
+  declining: [],
+  stable: [],
+  available: false,
+};
 
-  const { analyzeLongTermTrends, hasDatabase } = await import("@/lib/db");
-  const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const selectedDomain = domains.includes(
-    (resolvedSearchParams?.domain as ArticleDomain | "All") ?? "All",
-  )
-    ? ((resolvedSearchParams?.domain as ArticleDomain | "All") ?? "All")
-    : "All";
-  const trendData = await analyzeLongTermTrends(selectedDomain);
+export function DesktopTrendsClient() {
+  const [selectedDomain, setSelectedDomain] = useState<ArticleDomain | "All">("All");
+  const [trendData, setTrendData] = useState<TrendData>(emptyTrendData);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadTrends() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const result = await window.desktop?.data.getLongTermTrends({ weeks: 12 });
+
+        if (!cancelled) {
+          setTrendData((result as TrendData | undefined) ?? emptyTrendData);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "Unable to load trends");
+          setTrendData(emptyTrendData);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadTrends();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDomain]);
 
   return (
     <AppShell activePath="/trends">
@@ -130,9 +164,10 @@ export default async function TrendsPage({
           <section className="panel-divider">
             <div className="flex flex-wrap items-center gap-2">
               {domains.map((domain) => (
-                <Link
+                <button
                   key={domain}
-                  href={domain === "All" ? "/trends" : `/trends?domain=${domain}`}
+                  type="button"
+                  onClick={() => setSelectedDomain(domain)}
                   className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                     selectedDomain === domain
                       ? "bg-sky-600 text-white shadow-sm"
@@ -140,19 +175,19 @@ export default async function TrendsPage({
                   }`}
                 >
                   {domain}
-                </Link>
+                </button>
               ))}
             </div>
-            {!hasDatabase() ? (
-              <p className="mt-3 text-sm text-amber-800">
-                `POSTGRES_URL` is not configured locally, so persistent historical trends are not
-                available yet.
-              </p>
-            ) : null}
+            <p className="mt-3 text-sm text-slate-500">
+              Desktop trend data is loaded from local SQLite through Electron IPC.
+            </p>
+            {error ? <p className="mt-3 text-sm text-rose-700">{error}</p> : null}
           </section>
         </section>
 
-        {trendData.available ? (
+        {loading ? (
+          <section className="surface-muted text-sm text-slate-500">Loading local trends...</section>
+        ) : trendData.available ? (
           <>
             <TrendSection title="Rising Trends" items={trendData.rising} tone="up" />
             <TrendSection title="Declining Trends" items={trendData.declining} tone="down" />
@@ -160,8 +195,8 @@ export default async function TrendsPage({
           </>
         ) : (
           <section className="surface-muted text-sm text-slate-500">
-            Historical trend data will appear here after `POSTGRES_URL` is configured and weekly
-            pattern snapshots begin accumulating.
+            Historical trend data will appear here after local refresh jobs accumulate pattern
+            snapshots.
           </section>
         )}
       </div>
