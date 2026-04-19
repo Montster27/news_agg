@@ -4,6 +4,8 @@ npm-debug.log*
 .env.local
 .env*.local
 tsconfig.tsbuildinfo
+*.swp
+*.swo
 
 certificates
 out
