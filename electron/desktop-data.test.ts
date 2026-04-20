@@ -223,11 +223,13 @@ describe("Electron Phase 2 local data layer", () => {
     expect(stored.skipReason).toBe("battery");
   });
 
-  it("skips refresh jobs when memory pressure is high", async () => {
+  it("takes a memory break and continues when pressure is recoverable", async () => {
     const db = createDb();
     let fetched = false;
     const memoryState = {
       constrained: true,
+      critical: false,
+      severity: "warning",
       reasons: ["system free memory below 768 MB"],
       rssMb: 420,
       heapUsedMb: 120,
@@ -240,6 +242,49 @@ describe("Electron Phase 2 local data layer", () => {
       db,
       resourceMonitor: {
         getMemoryState: () => memoryState,
+        waitForMemoryRecovery: () =>
+          Promise.resolve({
+            waitedMs: 10,
+            memoryState: { ...memoryState, constrained: false, reasons: [], severity: "ok" },
+          }),
+      },
+      fetchAllFeeds: () => {
+        fetched = true;
+        return Promise.resolve([{ articles: [sampleArticle()], error: null }]);
+      },
+    });
+
+    const result = await refreshService.runRefresh({ manual: true });
+    const stored = getLastRefreshStats(db);
+
+    expect(fetched).toBe(true);
+    expect(result.success).toBe(true);
+    expect(result.skipped).toBeUndefined();
+    expect(result.memoryBreaks).toBe(1);
+    expect(stored.memoryBreaks).toBe(1);
+  });
+
+  it("skips refresh jobs when memory pressure stays critical", async () => {
+    const db = createDb();
+    let fetched = false;
+    const memoryState = {
+      constrained: true,
+      critical: true,
+      severity: "critical",
+      reasons: ["system free memory below 256 MB"],
+      criticalReasons: ["system free memory below 256 MB"],
+      rssMb: 420,
+      heapUsedMb: 120,
+      systemFreeMemoryMb: 128,
+      systemTotalMemoryMb: 8192,
+      minFreeMemoryMb: 256,
+      maxProcessRssMb: 1536,
+    };
+    const refreshService = createRefreshService({
+      db,
+      resourceMonitor: {
+        getMemoryState: () => memoryState,
+        waitForMemoryRecovery: () => Promise.resolve({ waitedMs: 10, memoryState }),
       },
       fetchAllFeeds: () => {
         fetched = true;

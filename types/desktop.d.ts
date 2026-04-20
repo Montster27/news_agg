@@ -15,6 +15,22 @@ declare global {
     systemFreeMemoryDeltaMb: number;
   };
 
+  type DesktopMemoryState = {
+    constrained: boolean;
+    critical?: boolean;
+    severity?: "ok" | "warning" | "critical";
+    reasons: string[];
+    criticalReasons?: string[];
+    rssMb: number;
+    heapUsedMb: number;
+    systemFreeMemoryMb: number;
+    systemTotalMemoryMb: number;
+    warningFreeMemoryMb?: number;
+    minFreeMemoryMb: number;
+    warningProcessRssMb?: number;
+    maxProcessRssMb: number;
+  };
+
   type DesktopPowerState = {
     source: "battery" | "external" | "unknown";
     onBattery: boolean;
@@ -38,6 +54,8 @@ declare global {
     error?: string;
     warning?: string;
     skipped?: boolean;
+    memory?: DesktopMemoryState;
+    memoryBreaks?: number;
   };
 
   type DesktopPreferences = {

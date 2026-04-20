@@ -29,7 +29,11 @@ function formatArticleImpact(result: DesktopOperationResult) {
   }
 
   const incoming = result.incoming ?? (result.inserted ?? 0) + (result.updated ?? 0);
-  return `${incoming} in - ${result.inserted ?? 0} new - ${result.updated ?? 0} updated`;
+  const memoryBreaks =
+    result.memoryBreaks && result.memoryBreaks > 0
+      ? ` - ${result.memoryBreaks} memory break${result.memoryBreaks === 1 ? "" : "s"}`
+      : "";
+  return `${incoming} in - ${result.inserted ?? 0} new - ${result.updated ?? 0} updated${memoryBreaks}`;
 }
 
 function formatResourceImpact(result: DesktopOperationResult) {

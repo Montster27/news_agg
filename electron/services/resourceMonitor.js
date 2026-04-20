@@ -1,7 +1,11 @@
 const os = require("node:os");
 
-const DEFAULT_MIN_FREE_MEMORY_MB = 768;
-const DEFAULT_MAX_PROCESS_RSS_MB = 1024;
+const DEFAULT_WARNING_FREE_MEMORY_MB = 768;
+const DEFAULT_MIN_FREE_MEMORY_MB = 256;
+const DEFAULT_WARNING_PROCESS_RSS_MB = 1024;
+const DEFAULT_MAX_PROCESS_RSS_MB = 1536;
+const DEFAULT_MEMORY_RECOVERY_WAIT_MS = 2500;
+const DEFAULT_MEMORY_RECOVERY_POLL_MS = 250;
 
 function bytesToMegabytes(value) {
   return Number((value / 1024 / 1024).toFixed(1));
@@ -13,16 +17,36 @@ function readPositiveNumber(value, fallback) {
 }
 
 function createResourceMonitor({
+  warningFreeMemoryMb = readPositiveNumber(
+    process.env.NEWS_AGG_WARNING_FREE_MEMORY_MB,
+    DEFAULT_WARNING_FREE_MEMORY_MB,
+  ),
   minFreeMemoryMb = readPositiveNumber(
     process.env.NEWS_AGG_MIN_FREE_MEMORY_MB,
     DEFAULT_MIN_FREE_MEMORY_MB,
+  ),
+  warningProcessRssMb = readPositiveNumber(
+    process.env.NEWS_AGG_WARNING_PROCESS_RSS_MB,
+    DEFAULT_WARNING_PROCESS_RSS_MB,
   ),
   maxProcessRssMb = readPositiveNumber(
     process.env.NEWS_AGG_MAX_PROCESS_RSS_MB,
     DEFAULT_MAX_PROCESS_RSS_MB,
   ),
+  recoveryWaitMs = readPositiveNumber(
+    process.env.NEWS_AGG_MEMORY_RECOVERY_WAIT_MS,
+    DEFAULT_MEMORY_RECOVERY_WAIT_MS,
+  ),
+  recoveryPollMs = readPositiveNumber(
+    process.env.NEWS_AGG_MEMORY_RECOVERY_POLL_MS,
+    DEFAULT_MEMORY_RECOVERY_POLL_MS,
+  ),
 } = {}) {
-  return {
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  const monitor = {
     getMemoryState() {
       const memoryUsage = process.memoryUsage();
       const systemFreeMemory = os.freemem();
@@ -32,24 +56,63 @@ function createResourceMonitor({
       const rssMb = bytesToMegabytes(memoryUsage.rss);
       const heapUsedMb = bytesToMegabytes(memoryUsage.heapUsed);
       const reasons = [];
+      const criticalReasons = [];
+
+      if (systemFreeMemoryMb < warningFreeMemoryMb) {
+        reasons.push(`system free memory below ${warningFreeMemoryMb} MB`);
+      }
 
       if (systemFreeMemoryMb < minFreeMemoryMb) {
-        reasons.push(`system free memory below ${minFreeMemoryMb} MB`);
+        criticalReasons.push(`system free memory below ${minFreeMemoryMb} MB`);
+      }
+
+      if (rssMb > warningProcessRssMb) {
+        reasons.push(`process RSS above ${warningProcessRssMb} MB`);
       }
 
       if (rssMb > maxProcessRssMb) {
-        reasons.push(`process RSS above ${maxProcessRssMb} MB`);
+        criticalReasons.push(`process RSS above ${maxProcessRssMb} MB`);
       }
 
       return {
-        constrained: reasons.length > 0,
-        reasons,
+        constrained: reasons.length > 0 || criticalReasons.length > 0,
+        critical: criticalReasons.length > 0,
+        severity: criticalReasons.length ? "critical" : reasons.length ? "warning" : "ok",
+        reasons: [...criticalReasons, ...reasons],
+        criticalReasons,
         rssMb,
         heapUsedMb,
         systemFreeMemoryMb,
         systemTotalMemoryMb,
+        warningFreeMemoryMb,
         minFreeMemoryMb,
+        warningProcessRssMb,
         maxProcessRssMb,
+      };
+    },
+    async waitForMemoryRecovery({
+      maxWaitMs = recoveryWaitMs,
+      pollMs = recoveryPollMs,
+    } = {}) {
+      const startedAt = Date.now();
+      let memoryState = monitor.getMemoryState();
+
+      while (memoryState.constrained && Date.now() - startedAt < maxWaitMs) {
+        if (typeof global.gc === "function") {
+          global.gc();
+        }
+
+        await sleep(pollMs);
+        memoryState = monitor.getMemoryState();
+
+        if (!memoryState.critical) {
+          break;
+        }
+      }
+
+      return {
+        waitedMs: Date.now() - startedAt,
+        memoryState,
       };
     },
     start() {
@@ -92,6 +155,8 @@ function createResourceMonitor({
       };
     },
   };
+
+  return monitor;
 }
 
 module.exports = {

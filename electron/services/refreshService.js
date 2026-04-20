@@ -24,6 +24,7 @@ const MAX_ARTICLES_PER_SOURCE = 5;
 const MAX_FEED_BYTES = 1_500_000;
 const MAX_CONCURRENT_FEEDS = 3;
 const FEED_BATCH_PAUSE_MS = 150;
+const MEMORY_COOLDOWN_PAUSE_MS = 750;
 
 function stripHtml(value) {
   return String(value ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
@@ -49,6 +50,25 @@ function formatMemoryState(memoryState) {
   ];
 
   return `${memoryState.reasons?.join(", ") || "memory pressure"} (${details.join(", ")})`;
+}
+
+function isCriticalMemoryState(memoryState) {
+  return Boolean(memoryState?.critical || memoryState?.severity === "critical");
+}
+
+async function pauseForMemory(resourceMonitor, {
+  fallbackPauseMs = MEMORY_COOLDOWN_PAUSE_MS,
+  maxWaitMs,
+} = {}) {
+  if (typeof resourceMonitor?.waitForMemoryRecovery === "function") {
+    return resourceMonitor.waitForMemoryRecovery({ maxWaitMs });
+  }
+
+  await sleep(fallbackPauseMs);
+  return {
+    waitedMs: fallbackPauseMs,
+    memoryState: resourceMonitor?.getMemoryState?.() ?? null,
+  };
 }
 
 async function readResponseTextWithLimit(response, maxBytes = MAX_FEED_BYTES) {
@@ -224,36 +244,59 @@ async function fetchAllFeeds(preferences, {
   maxConcurrentFeeds = MAX_CONCURRENT_FEEDS,
   maxFeedBytes = MAX_FEED_BYTES,
   batchPauseMs = FEED_BATCH_PAUSE_MS,
+  memoryCooldownPauseMs = MEMORY_COOLDOWN_PAUSE_MS,
   resourceMonitor,
   fetchFeedFn = fetchFeed,
 } = {}) {
   const results = [];
   const concurrency = Math.max(1, Number(maxConcurrentFeeds) || 1);
+  let memoryBreaks = 0;
 
   for (let index = 0; index < sourceList.length; index += concurrency) {
     const memoryState = resourceMonitor?.getMemoryState?.();
+    let batchConcurrency = concurrency;
 
     if (memoryState?.constrained) {
-      const message = `Refresh stopped early because ${formatMemoryState(memoryState)}`;
-      results.push(
-        ...sourceList.slice(index).map((source) => ({
-          articles: [],
-          error: `${source.name}: ${message}`,
-        })),
-      );
-      break;
+      memoryBreaks += 1;
+      const recovered = await pauseForMemory(resourceMonitor, {
+        fallbackPauseMs: memoryCooldownPauseMs,
+      });
+
+      if (isCriticalMemoryState(recovered.memoryState)) {
+        const message = `Refresh stopped early because ${formatMemoryState(recovered.memoryState)}`;
+        results.push(
+          ...sourceList.slice(index).map((source) => ({
+            articles: [],
+            error: `${source.name}: ${message}`,
+          })),
+        );
+        break;
+      }
+
+      batchConcurrency = 1;
     }
 
-    const batch = sourceList.slice(index, index + concurrency);
+    const batch = sourceList.slice(index, index + batchConcurrency);
     results.push(
       ...(await Promise.all(
         batch.map((source) => fetchFeedFn(source, preferences, { maxFeedBytes })),
       )),
     );
 
-    if (batchPauseMs > 0 && index + concurrency < sourceList.length) {
-      await sleep(batchPauseMs);
+    if (batchPauseMs > 0 && index + batchConcurrency < sourceList.length) {
+      await sleep(memoryState?.constrained ? Math.max(batchPauseMs, memoryCooldownPauseMs) : batchPauseMs);
     }
+
+    if (batchConcurrency !== concurrency) {
+      index -= concurrency - batchConcurrency;
+    }
+  }
+
+  if (memoryBreaks > 0) {
+    Object.defineProperty(results, "memoryBreaks", {
+      value: memoryBreaks,
+      enumerable: false,
+    });
   }
 
   return results;
@@ -311,27 +354,37 @@ function createRefreshService({
         return result;
       }
 
-      const memoryState = resourceMonitor?.getMemoryState?.();
+      let memoryState = resourceMonitor?.getMemoryState?.();
+      let memoryBreaks = 0;
 
       if (memoryState?.constrained) {
-        const skippedAt = new Date().toISOString();
-        const result = {
-          success: false,
-          skipped: true,
-          skipReason: "memory",
-          inserted: 0,
-          updated: 0,
-          incoming: 0,
-          fetchedAt: skippedAt,
-          startedAt,
-          completedAt: skippedAt,
-          trigger,
-          power: powerState,
-          memory: memoryState,
-          error: `Refresh paused because ${formatMemoryState(memoryState)}`,
-        };
-        setLastRefreshStats(db, result);
-        return result;
+        const recovered = await pauseForMemory(resourceMonitor, {
+          maxWaitMs: options.manual ? 3500 : 1500,
+        });
+        memoryState = recovered.memoryState;
+        memoryBreaks += 1;
+
+        if (isCriticalMemoryState(memoryState)) {
+          const skippedAt = new Date().toISOString();
+          const result = {
+            success: false,
+            skipped: true,
+            skipReason: "memory",
+            inserted: 0,
+            updated: 0,
+            incoming: 0,
+            fetchedAt: skippedAt,
+            startedAt,
+            completedAt: skippedAt,
+            trigger,
+            power: powerState,
+            memory: memoryState,
+            memoryBreaks,
+            error: `Refresh paused because ${formatMemoryState(memoryState)}`,
+          };
+          setLastRefreshStats(db, result);
+          return result;
+        }
       }
 
       const resourceSample = resourceMonitor?.start?.();
@@ -356,6 +409,7 @@ function createRefreshService({
       const settled = await (fetchAllFeedsOverride ?? fetchAllFeeds)(preferences, {
         resourceMonitor,
       });
+      memoryBreaks += Number(settled.memoryBreaks ?? 0);
       const articles = dedupeByUrl(settled.flatMap((result) => result.articles))
         .sort((left, right) => new Date(right.published_at).getTime() - new Date(left.published_at).getTime())
         .slice(0, 60);
@@ -402,9 +456,11 @@ function createRefreshService({
         incoming: articles.length,
         notificationCount,
         fetchedAt: refreshedAt,
-        warning: errors.length ? errors.slice(0, 3).join("; ") : undefined,
-        manual: Boolean(options.manual),
-      });
+          warning: errors.length ? errors.slice(0, 3).join("; ") : undefined,
+          memoryBreaks,
+          memory: memoryState?.constrained ? memoryState : undefined,
+          manual: Boolean(options.manual),
+        });
     })();
 
     try {
