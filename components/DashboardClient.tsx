@@ -4,15 +4,17 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArticleCard } from "@/components/ArticleCard";
 import { dashboardGroups } from "@/lib/data";
-import { Article } from "@/lib/types";
+import { Article, StoryCluster } from "@/lib/types";
 
 type RssResponse = {
   articles: Article[];
+  clusters?: StoryCluster[];
   fetchedAt: string;
 };
 
 export function DashboardClient() {
   const [articles, setArticles] = useState<Article[]>([]);
+  const [clusters, setClusters] = useState<StoryCluster[]>([]);
   const [fetchedAt, setFetchedAt] = useState<string>("");
   const [activeSource, setActiveSource] = useState<string>("All sources");
   const [activeCategory, setActiveCategory] = useState<string>("All categories");
@@ -36,12 +38,14 @@ export function DashboardClient() {
 
         if (!cancelled) {
           setArticles(payload.articles);
+          setClusters(payload.clusters ?? []);
           setFetchedAt(payload.fetchedAt);
           setError(null);
         }
       } catch (loadError) {
         if (!cancelled) {
           setArticles([]);
+          setClusters([]);
           setError("Unable to load RSS feeds right now.");
         }
       } finally {
@@ -94,8 +98,20 @@ export function DashboardClient() {
   }, [activeCategory, activeSource, activeTags, articles]);
 
   const latestArticles = filteredArticles.slice(0, 24);
-  const topSignals = [...latestArticles]
-    .sort((left, right) => right.importance - left.importance)
+  const filteredClusters = clusters.filter((cluster) => {
+    const sourceMatches =
+      activeSource === "All sources" ||
+      cluster.articles.some((article) => article.source === activeSource);
+    const categoryMatches =
+      activeCategory === "All categories" || cluster.domain === activeCategory;
+    const tagMatches =
+      activeTags.length === 0 ||
+      activeTags.every((tag) => cluster.tags.includes(tag));
+
+    return sourceMatches && categoryMatches && tagMatches;
+  });
+  const topSignals = [...filteredClusters]
+    .sort((left, right) => right.impactScore - left.impactScore)
     .slice(0, 5);
 
   const relatedArticles = useMemo(() => {
@@ -242,14 +258,14 @@ export function DashboardClient() {
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-2xl font-semibold text-ink">Top Signals</h2>
               <span className="text-sm text-slate-500">
-                Latest {Math.min(latestArticles.length, 24)} articles
+                Top {Math.min(topSignals.length, 5)} story clusters
               </span>
             </div>
             <div className="grid gap-4 lg:grid-cols-2">
-              {topSignals.map((article) => (
+              {topSignals.map((cluster) => (
                 <ArticleCard
-                  key={article.id}
-                  article={article}
+                  key={cluster.id}
+                  cluster={cluster}
                   isHighlighted={true}
                   activeTags={activeTags}
                   onTagClick={toggleTag}

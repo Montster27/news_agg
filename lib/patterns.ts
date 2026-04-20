@@ -141,31 +141,31 @@ export function generateInsights(data: {
 
   if (leader) {
     insights.push(
-      `${leader.tag.replaceAll("_", " ")} is the most frequent ${data.domain.toLowerCase()} signal this week.`,
+      `${leader.tag.replace(/_/g, " ")} is the most frequent ${data.domain.toLowerCase()} signal this week.`,
     );
   }
 
   if (emerging) {
     insights.push(
-      `${emerging.tag.replaceAll("_", " ")} is trending up versus the previous week, indicating a strengthening signal.`,
+      `${emerging.tag.replace(/_/g, " ")} is trending up versus the previous week, indicating a strengthening signal.`,
     );
   }
 
   if (stable) {
     insights.push(
-      `${stable.tag.replaceAll("_", " ")} remains established, showing continued attention without a major week-over-week jump.`,
+      `${stable.tag.replace(/_/g, " ")} remains established, showing continued attention without a major week-over-week jump.`,
     );
   }
 
   if (fading) {
     insights.push(
-      `${fading.tag.replaceAll("_", " ")} is fading relative to the previous week, suggesting that theme is cooling off.`,
+      `${fading.tag.replace(/_/g, " ")} is fading relative to the previous week, suggesting that theme is cooling off.`,
     );
   }
 
   if (correlation) {
     insights.push(
-      `${correlation.pair[0].replaceAll("_", " ")} and ${correlation.pair[1].replaceAll("_", " ")} are frequently appearing together across recent coverage.`,
+      `${correlation.pair[0].replace(/_/g, " ")} and ${correlation.pair[1].replace(/_/g, " ")} are frequently appearing together across recent coverage.`,
     );
   }
 

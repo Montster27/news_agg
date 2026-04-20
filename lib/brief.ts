@@ -78,8 +78,8 @@ function normalizeBullets(items: unknown, fallback: string[]) {
 }
 
 function fallbackBrief(patterns: PatternAnalysis): WeeklyBrief {
-  const leader = patterns.topTags[0]?.tag?.replaceAll("_", " ") ?? "tech coverage";
-  const trend = patterns.trendingUp.find((entry) => entry.delta > 0)?.tag?.replaceAll("_", " ");
+  const leader = patterns.topTags[0]?.tag?.replace(/_/g, " ") ?? "tech coverage";
+  const trend = patterns.trendingUp.find((entry) => entry.delta > 0)?.tag?.replace(/_/g, " ");
   const correlation = patterns.correlations[0];
 
   return {
@@ -95,7 +95,7 @@ function fallbackBrief(patterns: PatternAnalysis): WeeklyBrief {
         ? `${trend} is gaining visibility across recent reporting.`
         : "A small set of recurring themes continues to shape the current reporting window.",
       correlation
-        ? `${correlation.pair[0].replaceAll("_", " ")} and ${correlation.pair[1].replaceAll("_", " ")} are appearing together often enough to matter.`
+        ? `${correlation.pair[0].replace(/_/g, " ")} and ${correlation.pair[1].replace(/_/g, " ")} are appearing together often enough to matter.`
         : "Co-occurring tags suggest infrastructure, strategy, and execution issues are showing up together.",
       "Recent coverage is shifting toward operational constraints instead of broad narrative framing.",
     ],

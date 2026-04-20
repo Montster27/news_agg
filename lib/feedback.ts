@@ -254,6 +254,6 @@ export function getLearningExplanation(
   );
 
   return strongestTag
-    ? `${direction} based on your past scoring of ${strongestTag.replaceAll("_", " ")} stories.`
+    ? `${direction} based on your past scoring of ${strongestTag.replace(/_/g, " ")} stories.`
     : `${direction} based on your past scoring of ${article.domain} stories.`;
 }

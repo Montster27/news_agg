@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { ImportanceEditor } from "@/components/ImportanceEditor";
 import { Tag } from "@/components/Tag";
-import { Article, ImportanceFeedback } from "@/lib/types";
+import { Article, ImportanceFeedback, StoryCluster } from "@/lib/types";
 
 type ArticleCardProps = {
-  article: Article;
+  article?: Article;
+  cluster?: StoryCluster;
   isHighlighted?: boolean;
   activeTags?: string[];
   feedback?: ImportanceFeedback;
@@ -20,6 +21,7 @@ type ArticleCardProps = {
 
 export function ArticleCard({
   article,
+  cluster,
   isHighlighted = false,
   activeTags = [],
   feedback,
@@ -28,6 +30,76 @@ export function ArticleCard({
   onImportanceReset,
 }: ArticleCardProps) {
   const [expanded, setExpanded] = useState(false);
+
+  if (cluster) {
+    const bullets = cluster.why_it_matters
+      .split(/\n+/)
+      .map((item) => item.replace(/^[-*]\s*/, "").trim())
+      .filter(Boolean)
+      .slice(0, 3);
+
+    return (
+      <article
+        className={`rounded-2xl border bg-white p-5 shadow-panel ${
+          isHighlighted ? "border-accent/40" : "border-line"
+        }`}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+              <span>{cluster.domain}</span>
+              <span>{cluster.sources.length} sources</span>
+              <span>{cluster.confidence} confidence</span>
+            </div>
+            <h3 className="text-lg font-semibold text-ink">{cluster.headline}</h3>
+          </div>
+          <div className="rounded-xl border border-line bg-mist px-3 py-2 text-right">
+            <div className="text-[10px] font-semibold uppercase text-slate-500">Impact</div>
+            <div className="text-xl font-semibold text-ink">{cluster.impactScore.toFixed(1)}</div>
+          </div>
+        </div>
+
+        {cluster.tags?.length ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {cluster.tags.map((tag) => (
+              <Tag
+                key={tag}
+                label={tag}
+                active={activeTags.includes(tag)}
+                onClick={onTagClick}
+              />
+            ))}
+          </div>
+        ) : null}
+
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          className="mt-4 text-sm font-medium text-accent"
+        >
+          {expanded ? "Hide synthesis" : "Show why it matters"}
+        </button>
+
+        {expanded ? (
+          <div className="mt-3 space-y-3">
+            <p className="text-sm leading-6 text-slate-600">{cluster.summary}</p>
+            <ul className="space-y-1 text-sm leading-6 text-slate-600">
+              {bullets.map((bullet) => (
+                <li key={bullet}>- {bullet}</li>
+              ))}
+            </ul>
+            <div className="text-xs text-slate-500">
+              Raw articles: {cluster.articles.length}
+            </div>
+          </div>
+        ) : null}
+      </article>
+    );
+  }
+
+  if (!article) {
+    return null;
+  }
 
   return (
     <article

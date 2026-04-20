@@ -14,13 +14,17 @@ import {
   setUserImportance,
   type ImportanceLearningProfile,
 } from "@/lib/feedback";
-import { ArticleDomain, ImportanceFeedback } from "@/lib/types";
 import { AppShell } from "@/components/AppShell";
 import { DesktopControls } from "@/components/DesktopControls";
 import { FiltersBar } from "@/components/FiltersBar";
 import { SearchCommandPanel } from "@/components/SearchCommandPanel";
 import { TopSignals } from "@/components/TopSignals";
-import type { Article } from "@/lib/types";
+import type {
+  Article,
+  ArticleDomain,
+  ImportanceFeedback,
+  StoryCluster,
+} from "@/lib/types";
 import type { WeeklyBrief } from "@/lib/brief";
 import type { PatternAnalysis } from "@/lib/patterns";
 import type { LongTermTrendAnalysis } from "@/lib/db";
@@ -59,8 +63,14 @@ const ArticleList = dynamic(
   },
 );
 
+const DESKTOP_ARTICLE_LIMIT = 200;
+const CLUSTER_INPUT_LIMIT = 120;
+const VISIBLE_CLUSTER_LIMIT = 40;
+const VISIBLE_ARTICLE_LIMIT = 120;
+
 type CommandCenterClientProps = {
   articles: Article[];
+  clusters?: StoryCluster[];
   brief: WeeklyBrief;
   patterns: PatternAnalysis;
   longTermTrends: LongTermTrendAnalysis;
@@ -71,7 +81,7 @@ type CommandCenterClientProps = {
 function inferRelatedTag(text: string, tags: string[]) {
   const normalized = text.toLowerCase();
   return (
-    tags.find((tag) => normalized.includes(tag.replaceAll("_", " "))) ??
+    tags.find((tag) => normalized.includes(tag.replace(/_/g, " "))) ??
     tags.find((tag) => normalized.includes(tag))
   );
 }
@@ -90,8 +100,169 @@ function withinRange(article: Article, range: "today" | "week" | "month") {
   return age <= 30 * 24 * 60 * 60 * 1000;
 }
 
+const CLIENT_STOP_WORDS = new Set([
+  "about",
+  "after",
+  "amid",
+  "from",
+  "into",
+  "over",
+  "says",
+  "that",
+  "this",
+  "with",
+  "will",
+]);
+
+const CLIENT_STRATEGIC_TAGS = new Set([
+  "ai_infrastructure",
+  "chips",
+  "energy_constraint",
+  "data_centers",
+  "frontier_models",
+  "security",
+  "regulation",
+  "inference",
+  "gpu",
+  "cloud",
+]);
+
+function stableClientSlug(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 72);
+}
+
+function uniqueStrings(values: Array<string | undefined>) {
+  return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
+}
+
+function clientTokens(value: string) {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length > 2 && !CLIENT_STOP_WORDS.has(token));
+}
+
+function articleTopicTerms(article: Article) {
+  return new Set(clientTokens(`${article.headline} ${article.summary} ${article.tags.join(" ")}`));
+}
+
+function overlapsCluster(article: Article, group: Article[]) {
+  const articleTerms = articleTopicTerms(article);
+  const articleTags = new Set(article.tags);
+
+  return group.some((candidate) => {
+    if (article.url && candidate.url && article.url === candidate.url) {
+      return true;
+    }
+
+    const sharedTags = candidate.tags.filter((tag) => articleTags.has(tag)).length;
+    if (article.domain === candidate.domain && sharedTags > 0) {
+      return true;
+    }
+
+    const candidateTerms = articleTopicTerms(candidate);
+    const sharedTerms = [...articleTerms].filter((term) => candidateTerms.has(term)).length;
+    return sharedTerms >= 3;
+  });
+}
+
+function clientConfidence(sourceCount: number): StoryCluster["confidence"] {
+  if (sourceCount >= 3) return "high";
+  if (sourceCount === 2) return "medium";
+  return "low";
+}
+
+function clientImpactScore(articles: Article[], sources: string[], tags: string[]) {
+  const newestTime = Math.max(
+    ...articles.map((article) => new Date(article.processed_at || article.date).getTime()),
+  );
+  const ageHours = (Date.now() - newestTime) / (60 * 60 * 1000);
+  const recency = ageHours <= 12 ? 2 : ageHours <= 48 ? 1.5 : ageHours <= 168 ? 1 : 0.5;
+  const maxImportance = Math.max(...articles.map((article) => article.importance));
+  const tagBoost = Math.min(
+    tags.filter((tag) => CLIENT_STRATEGIC_TAGS.has(tag)).length * 0.5,
+    1.5,
+  );
+
+  return Number(Math.max(1, Math.min(10, sources.length * 2 + recency + maxImportance * 0.6 + tagBoost)).toFixed(1));
+}
+
+function clientWhyItMatters(tags: string[], domain: string, sourceCount: number) {
+  const leadTag = tags[0]?.replace(/_/g, " ") ?? "this signal";
+  const sourceText =
+    sourceCount > 1
+      ? `${sourceCount} sources are reinforcing the story`
+      : "one source is reporting the story";
+
+  return [
+    `Strategic impact: ${sourceText}, making ${leadTag} worth tracking in ${domain}.`,
+    `Technical implication: the coverage points to execution constraints around ${leadTag}.`,
+    "Future direction: watch for follow-on reporting, customer adoption, regulation, or supply-chain effects.",
+  ].join("\n");
+}
+
+function buildClientClusters(articles: Article[]) {
+  const groups: Article[][] = [];
+  const sortedArticles = articles.slice(0, CLUSTER_INPUT_LIMIT).sort(
+    (left, right) =>
+      new Date(right.date).getTime() - new Date(left.date).getTime() ||
+      right.importance - left.importance,
+  );
+
+  for (const article of sortedArticles) {
+    const group = groups.find((candidateGroup) => overlapsCluster(article, candidateGroup));
+
+    if (group) {
+      group.push(article);
+    } else {
+      groups.push([article]);
+    }
+  }
+
+  return groups
+    .map((group) => {
+      const ranked = [...group].sort(
+        (left, right) =>
+          right.importance - left.importance ||
+          new Date(right.date).getTime() - new Date(left.date).getTime(),
+      );
+      const lead = ranked[0];
+      const sources = uniqueStrings(group.map((article) => article.source));
+      const tags = uniqueStrings(group.flatMap((article) => article.tags)).slice(0, 8);
+      const updatedAt = new Date(
+        Math.max(
+          ...group.map((article) => new Date(article.processed_at || article.date).getTime()),
+        ),
+      ).toISOString();
+
+      return {
+        id: `cluster-${stableClientSlug(lead.headline || lead.id)}`,
+        headline: lead.headline,
+        summary:
+          group.length > 1
+            ? `${lead.summary} Tracked across ${group.length} articles from ${sources.length} sources.`
+            : lead.summary,
+        why_it_matters: clientWhyItMatters(tags, lead.domain, sources.length),
+        articles: ranked,
+        sources,
+        tags,
+        domain: lead.domain,
+        impactScore: clientImpactScore(group, sources, tags),
+        confidence: clientConfidence(sources.length),
+        created_at: updatedAt,
+        updated_at: updatedAt,
+      } satisfies StoryCluster;
+    })
+    .sort((left, right) => right.impactScore - left.impactScore);
+}
+
 export function CommandCenterClient({
   articles: initialArticles,
+  clusters: initialClusters,
   brief: initialBrief,
   patterns: initialPatterns,
   longTermTrends: initialLongTermTrends,
@@ -99,6 +270,9 @@ export function CommandCenterClient({
   fetchedAt: initialFetchedAt,
 }: CommandCenterClientProps) {
   const [articles, setArticles] = useState(initialArticles);
+  const [clusters, setClusters] = useState<StoryCluster[]>(
+    initialClusters?.length ? initialClusters : buildClientClusters(initialArticles),
+  );
   const [brief, setBrief] = useState(initialBrief);
   const [patterns, setPatterns] = useState(initialPatterns);
   const [longTermTrends, setLongTermTrends] = useState(initialLongTermTrends);
@@ -132,7 +306,7 @@ export function CommandCenterClient({
         lastRefresh,
         preferences,
       ] = await Promise.all([
-        window.desktop.data.getArticles({ limit: 500 }),
+        window.desktop.data.getArticles({ limit: DESKTOP_ARTICLE_LIMIT }),
         window.desktop.data.getPatterns({ limit: 500 }),
         window.desktop.data.getBrief(),
         window.desktop.data.getInsights(),
@@ -143,6 +317,11 @@ export function CommandCenterClient({
       ]);
 
       setArticles(localArticles);
+      setClusters([]);
+      setRefreshStatus("Clustering local stories");
+      window.setTimeout(() => {
+        setClusters(buildClientClusters(localArticles));
+      }, 0);
       setPatterns(localPatterns);
       if (localBrief) {
         setBrief(localBrief);
@@ -231,6 +410,20 @@ export function CommandCenterClient({
     });
   }, [activeDomain, activeTags, articles, personalizedView, profile, timeRange]);
 
+  const filteredClusters = useMemo(() => {
+    return clusters.filter((cluster) => {
+      const matchesTime = cluster.articles.some((article) => withinRange(article, timeRange));
+      const matchesDomain = activeDomain === "All" || cluster.domain === activeDomain;
+      const matchesTags =
+        activeTags.length === 0 || activeTags.every((tag) => cluster.tags.includes(tag));
+      const excluded =
+        personalizedView &&
+        cluster.articles.every((article) => articleHasExcludedTag(article, profile));
+
+      return matchesTime && matchesDomain && matchesTags && !excluded;
+    });
+  }, [activeDomain, activeTags, clusters, personalizedView, profile, timeRange]);
+
   const filteredPatterns = useMemo(() => {
     const tagsToUse = activeTags.length
       ? patterns.trendingUp.filter((entry) => activeTags.includes(entry.tag))
@@ -264,21 +457,10 @@ export function CommandCenterClient({
   }, [activeTags, longTermTrends.rising, personalizedView, profile.preferred_tags]);
 
   const topSignals = useMemo(() => {
-    return [...filteredArticles]
-      .sort((left, right) => {
-        const rightScore = personalizedView
-          ? (scoreLookup.get(right.id) ?? right.importance)
-          : getEffectiveImportance(right, feedbackMap);
-        const leftScore = personalizedView
-          ? (scoreLookup.get(left.id) ?? left.importance)
-          : getEffectiveImportance(left, feedbackMap);
-
-        return rightScore - leftScore ||
-          getEffectiveImportance(right, feedbackMap) - getEffectiveImportance(left, feedbackMap) ||
-          new Date(right.date).getTime() - new Date(left.date).getTime();
-      })
+    return [...filteredClusters]
+      .sort((left, right) => right.impactScore - left.impactScore)
       .slice(0, 5);
-  }, [feedbackMap, filteredArticles, personalizedView, scoreLookup]);
+  }, [filteredClusters]);
 
   const sortedArticles = useMemo(() => {
     return [...filteredArticles].sort((left, right) => {
@@ -293,6 +475,18 @@ export function CommandCenterClient({
           new Date(right.date).getTime() - new Date(left.date).getTime();
     });
   }, [feedbackMap, filteredArticles, personalizedView, scoreLookup]);
+
+  const sortedClusters = useMemo(() => {
+    return [...filteredClusters].sort((left, right) => right.impactScore - left.impactScore);
+  }, [filteredClusters]);
+  const visibleClusters = useMemo(
+    () => sortedClusters.slice(0, VISIBLE_CLUSTER_LIMIT),
+    [sortedClusters],
+  );
+  const visibleArticles = useMemo(
+    () => sortedArticles.slice(0, VISIBLE_ARTICLE_LIMIT),
+    [sortedArticles],
+  );
 
   const orderedWeeklyShifts = useMemo(() => {
     if (!personalizedView) {
@@ -314,7 +508,7 @@ export function CommandCenterClient({
     return insightReport.insights.filter((insight) => {
       const text = `${insight.title} ${insight.explanation}`.toLowerCase();
       return activeTags.some((tag) => {
-        const readable = tag.replaceAll("_", " ");
+        const readable = tag.replace(/_/g, " ");
         return text.includes(tag) || text.includes(readable);
       });
     });
@@ -351,6 +545,18 @@ export function CommandCenterClient({
         url: article.url,
         date: article.date,
       })),
+      clusters: sortedClusters.map((cluster) => ({
+        id: cluster.id,
+        headline: cluster.headline,
+        summary: cluster.summary,
+        why_it_matters: cluster.why_it_matters,
+        sources: cluster.sources,
+        tags: cluster.tags,
+        domain: cluster.domain,
+        impactScore: cluster.impactScore,
+        confidence: cluster.confidence,
+        articleCount: cluster.articles.length,
+      })),
       feedback: feedbackMap,
       learning: learningProfile,
     }),
@@ -362,6 +568,7 @@ export function CommandCenterClient({
       personalizedView,
       scoreLookup,
       sortedArticles,
+      sortedClusters,
       timeRange,
     ],
   );
@@ -507,7 +714,7 @@ export function CommandCenterClient({
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                 <div className="text-[11px] font-semibold uppercase text-slate-500">Articles</div>
                 <div className="mt-1 text-sm font-semibold text-slate-900">
-                  {sortedArticles.length} visible
+                  {sortedClusters.length} clusters
                 </div>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
@@ -566,12 +773,9 @@ export function CommandCenterClient({
         {articles.length ? (
           <>
             <TopSignals
-              articles={topSignals}
+              clusters={topSignals}
               activeTags={activeTags}
               personalizedView={personalizedView}
-              scoreLookup={scoreLookup}
-              feedbackMap={feedbackMap}
-              learningProfile={learningProfile}
               onTagClick={toggleTag}
               onImportanceChange={handleImportanceChange}
               onImportanceReset={handleImportanceReset}
@@ -582,7 +786,10 @@ export function CommandCenterClient({
             </div>
 
             <ArticleList
-              articles={sortedArticles}
+              articles={visibleArticles}
+              clusters={visibleClusters}
+              totalArticleCount={sortedArticles.length}
+              totalClusterCount={sortedClusters.length}
               activeTags={activeTags}
               personalizedView={personalizedView}
               scoreLookup={scoreLookup}

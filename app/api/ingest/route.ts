@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { clusterArticles } from "@/lib/clustering";
 import { formatWeek } from "@/lib/ingest";
+import { generateWhyItMatters } from "@/lib/why-it-matters";
 import { Article, ArticleDomain } from "@/lib/types";
 
 const domains: ArticleDomain[] = ["AI", "Chips", "Infra", "Bio", "Energy", "Macro"];
@@ -68,6 +70,13 @@ export async function POST(request: NextRequest) {
         ? (body.importance as Article["importance"])
         : 3,
   };
+  const clusters = clusterArticles([article]);
+  const cluster = clusters[0]
+    ? {
+        ...clusters[0],
+        why_it_matters: await generateWhyItMatters(clusters[0]),
+      }
+    : null;
 
-  return NextResponse.json({ article });
+  return NextResponse.json({ article, cluster, clusters: cluster ? [cluster] : [] });
 }

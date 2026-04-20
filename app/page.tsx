@@ -54,6 +54,7 @@ function desktopBootstrapData() {
 
   return {
     articles,
+    clusters: [],
     brief,
     patterns,
     longTermTrends,
@@ -67,7 +68,7 @@ export default async function DashboardPage() {
     return <CommandCenterClient {...desktopBootstrapData()} />;
   }
 
-  const { articles, fetchedAt } = await ingestFeeds();
+  const { articles, clusters, fetchedAt } = await ingestFeeds();
   const patterns = await analyzePatternsWithPersistence(articles, "All");
   const brief = await generateWeeklyBrief(articles, patterns);
   const longTermTrends = await analyzeLongTermTrends("All");
@@ -80,6 +81,7 @@ export default async function DashboardPage() {
   return (
     <CommandCenterClient
       articles={articles}
+      clusters={clusters}
       brief={brief}
       patterns={patterns}
       longTermTrends={longTermTrends}

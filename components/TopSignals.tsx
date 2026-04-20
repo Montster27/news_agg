@@ -1,6 +1,6 @@
 "use client";
 
-import { Article } from "@/lib/types";
+import { Article, StoryCluster } from "@/lib/types";
 import type { ImportanceFeedback } from "@/lib/types";
 import type { ImportanceLearningProfile } from "@/lib/feedback";
 import {
@@ -11,7 +11,8 @@ import { ImportanceEditor } from "@/components/ImportanceEditor";
 import { Tag } from "@/components/Tag";
 
 type TopSignalsProps = {
-  articles: Article[];
+  articles?: Article[];
+  clusters?: StoryCluster[];
   activeTags: string[];
   personalizedView: boolean;
   scoreLookup?: Map<string, number>;
@@ -27,6 +28,7 @@ type TopSignalsProps = {
 
 export function TopSignals({
   articles,
+  clusters,
   activeTags,
   personalizedView,
   scoreLookup,
@@ -36,6 +38,8 @@ export function TopSignals({
   onImportanceChange,
   onImportanceReset,
 }: TopSignalsProps) {
+  const rankedClusters = clusters ?? [];
+
   return (
     <section className="surface-card p-4 sm:p-6">
       <div className="flex items-center justify-between gap-4 border-b border-slate-200 pb-4">
@@ -44,11 +48,95 @@ export function TopSignals({
           <h2 className="mt-1 text-2xl font-semibold text-slate-900">Top Signals</h2>
         </div>
         <span className="text-sm text-slate-500">
-          {personalizedView ? "Top 5 by personal score" : "Top 5 by importance"}
+          {rankedClusters.length
+            ? "Top 5 by impact score"
+            : personalizedView
+              ? "Top 5 by personal score"
+              : "Top 5 by importance"}
         </span>
       </div>
 
-      {articles.length ? (
+      {rankedClusters.length ? (
+        <div className="mt-6 grid gap-4 xl:grid-cols-2">
+          {rankedClusters.map((cluster) => {
+            const visibleTags = cluster.tags.slice(0, 5);
+            const hiddenTagCount = cluster.tags.length - visibleTags.length;
+            const bullets = cluster.why_it_matters
+              .split(/\n+/)
+              .map((item) => item.replace(/^[-*]\s*/, "").trim())
+              .filter(Boolean)
+              .slice(0, 3);
+
+            return (
+              <article
+                key={cluster.id}
+                className="group rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition duration-200 hover:border-sky-200 hover:shadow-md sm:p-5"
+              >
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-800">
+                        {cluster.domain}
+                      </span>
+                      <span>{cluster.sources.length} sources</span>
+                      <span
+                        className={`rounded-full px-2.5 py-1 ${
+                          cluster.confidence === "high"
+                            ? "bg-emerald-50 text-emerald-700"
+                            : cluster.confidence === "medium"
+                              ? "bg-sky-50 text-sky-700"
+                              : "bg-amber-50 text-amber-700"
+                        }`}
+                      >
+                        {cluster.confidence} confidence
+                      </span>
+                    </div>
+                    <h3 className="mt-3 text-lg font-semibold leading-7 text-slate-950">
+                      {cluster.headline}
+                    </h3>
+                    <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">
+                      {cluster.summary}
+                    </p>
+                    {bullets.length ? (
+                      <ul className="mt-4 space-y-1.5 text-sm leading-6 text-slate-600">
+                        {bullets.map((bullet) => (
+                          <li key={bullet}>- {bullet}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {visibleTags.length ? (
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {visibleTags.map((tag) => (
+                          <Tag
+                            key={tag}
+                            label={tag}
+                            active={activeTags.includes(tag)}
+                            onClick={onTagClick}
+                          />
+                        ))}
+                        {hiddenTagCount > 0 ? (
+                          <span className="tag-pill">+{hiddenTagCount}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="w-full shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left sm:w-32 sm:text-right">
+                    <div className="text-[11px] font-semibold uppercase text-slate-500">
+                      Impact
+                    </div>
+                    <div className="mt-1 text-2xl font-semibold text-slate-950">
+                      {cluster.impactScore.toFixed(1)}
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {cluster.articles.length} articles
+                    </div>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : articles?.length ? (
         <div className="mt-6 grid gap-4 xl:grid-cols-2">
           {articles.map((article) => {
             const visibleTags = article.tags.slice(0, 5);

@@ -174,24 +174,24 @@ function buildFallbackInsights(
 
   if (topInflection?.tag) {
     insights.push({
-      title: `${topInflection.tag.replaceAll("_", " ")} is hitting an inflection`,
-      explanation: `${topInflection.tag.replaceAll("_", " ")} is moving faster than nearby themes, which suggests a real shift rather than background noise.`,
+      title: `${topInflection.tag.replace(/_/g, " ")} is hitting an inflection`,
+      explanation: `${topInflection.tag.replace(/_/g, " ")} is moving faster than nearby themes, which suggests a real shift rather than background noise.`,
       confidence: "medium",
     });
   }
 
   if (crossDomain) {
     insights.push({
-      title: `${crossDomain.tag.replaceAll("_", " ")} is crossing domains`,
-      explanation: `${crossDomain.tag.replaceAll("_", " ")} now appears across ${crossDomain.domains.join(", ")}, pointing to a broader structural change rather than a single-domain story.`,
+      title: `${crossDomain.tag.replace(/_/g, " ")} is crossing domains`,
+      explanation: `${crossDomain.tag.replace(/_/g, " ")} now appears across ${crossDomain.domains.join(", ")}, pointing to a broader structural change rather than a single-domain story.`,
       confidence: "medium",
     });
   }
 
   if (longTerm) {
     insights.push({
-      title: `${longTerm.tag.replaceAll("_", " ")} is building over time`,
-      explanation: `${longTerm.tag.replaceAll("_", " ")} remains one of the clearest multi-week risers, which makes it worth watching beyond this week’s headlines.`,
+      title: `${longTerm.tag.replace(/_/g, " ")} is building over time`,
+      explanation: `${longTerm.tag.replace(/_/g, " ")} remains one of the clearest multi-week risers, which makes it worth watching beyond this week’s headlines.`,
       confidence: "medium",
     });
   }

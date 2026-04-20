@@ -1,6 +1,6 @@
 "use client";
 
-import { Article } from "@/lib/types";
+import { Article, StoryCluster } from "@/lib/types";
 import type { ImportanceFeedback } from "@/lib/types";
 import type { ImportanceLearningProfile } from "@/lib/feedback";
 import {
@@ -12,6 +12,9 @@ import { Tag } from "@/components/Tag";
 
 type ArticleListProps = {
   articles: Article[];
+  clusters?: StoryCluster[];
+  totalArticleCount?: number;
+  totalClusterCount?: number;
   activeTags: string[];
   personalizedView: boolean;
   scoreLookup?: Map<string, number>;
@@ -27,6 +30,9 @@ type ArticleListProps = {
 
 export function ArticleList({
   articles,
+  clusters = [],
+  totalArticleCount,
+  totalClusterCount,
   activeTags,
   personalizedView,
   scoreLookup,
@@ -36,17 +42,128 @@ export function ArticleList({
   onImportanceChange,
   onImportanceReset,
 }: ArticleListProps) {
+  const clusterCount = totalClusterCount ?? clusters.length;
+  const articleCount = totalArticleCount ?? articles.length;
+
   return (
     <section className="surface-card p-4 sm:p-6">
       <div className="flex items-center justify-between gap-4 border-b border-slate-200 pb-4">
         <div>
-          <p className="section-kicker">Drill-Down Articles</p>
-          <h2 className="mt-1 text-xl font-semibold text-slate-900">Articles</h2>
+          <p className="section-kicker">Ranked Story Clusters</p>
+          <h2 className="mt-1 text-xl font-semibold text-slate-900">Stories</h2>
         </div>
-        <span className="text-sm text-slate-500">{articles.length} visible</span>
+        <span className="text-sm text-slate-500">
+          {clusters.length
+            ? `Showing ${clusters.length} of ${clusterCount} clusters`
+            : `Showing ${articles.length} of ${articleCount}`}
+        </span>
       </div>
 
-      {articles.length ? (
+      {clusters.length ? (
+        <div className="mt-4 space-y-3">
+          {clusters.map((cluster) => {
+            const visibleTags = cluster.tags.slice(0, 5);
+            const hiddenTagCount = cluster.tags.length - visibleTags.length;
+            const bullets = cluster.why_it_matters
+              .split(/\n+/)
+              .map((item) => item.replace(/^[-*]\s*/, "").trim())
+              .filter(Boolean)
+              .slice(0, 3);
+
+            return (
+              <article
+                key={cluster.id}
+                className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition duration-200 hover:border-sky-200 hover:shadow-md sm:p-5"
+              >
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-slate-500">
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-800">
+                        {cluster.domain}
+                      </span>
+                      <span>{cluster.sources.length} sources</span>
+                      <span>{cluster.articles.length} articles</span>
+                      <span
+                        className={`rounded-full px-2.5 py-1 ${
+                          cluster.confidence === "high"
+                            ? "bg-emerald-50 text-emerald-700"
+                            : cluster.confidence === "medium"
+                              ? "bg-sky-50 text-sky-700"
+                              : "bg-amber-50 text-amber-700"
+                        }`}
+                      >
+                        {cluster.confidence} confidence
+                      </span>
+                    </div>
+                    <h3 className="mt-3 text-lg font-semibold leading-7 text-slate-950">
+                      {cluster.headline}
+                    </h3>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">{cluster.summary}</p>
+                    {bullets.length ? (
+                      <ul className="mt-4 space-y-1.5 text-sm leading-6 text-slate-600">
+                        {bullets.map((bullet) => (
+                          <li key={bullet}>- {bullet}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                  <div className="w-full shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left sm:w-32 sm:text-right">
+                    <div className="text-[11px] font-semibold uppercase text-slate-500">
+                      Impact
+                    </div>
+                    <div className="mt-1 text-2xl font-semibold text-slate-950">
+                      {cluster.impactScore.toFixed(1)}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  {visibleTags.map((tag) => (
+                    <Tag
+                      key={tag}
+                      label={tag}
+                      active={activeTags.includes(tag)}
+                      onClick={onTagClick}
+                    />
+                  ))}
+                  {hiddenTagCount > 0 ? (
+                    <span className="tag-pill">+{hiddenTagCount}</span>
+                  ) : null}
+                </div>
+                <details className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  <summary className="cursor-pointer font-medium text-slate-800">
+                    Raw articles
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    {cluster.articles.slice(0, 8).map((article) => (
+                      <div key={article.id} className="border-t border-slate-200 pt-3">
+                        <div className="font-medium text-slate-900">{article.headline}</div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          {[article.source, article.date].filter(Boolean).join(" · ")}
+                        </div>
+                        {article.url ? (
+                          <a
+                            href={article.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-2 inline-flex text-sm font-medium text-sky-700 hover:underline"
+                          >
+                            Open article
+                          </a>
+                        ) : null}
+                      </div>
+                    ))}
+                    {cluster.articles.length > 8 ? (
+                      <div className="border-t border-slate-200 pt-3 text-xs text-slate-500">
+                        {cluster.articles.length - 8} more raw articles in this cluster.
+                      </div>
+                    ) : null}
+                  </div>
+                </details>
+              </article>
+            );
+          })}
+        </div>
+      ) : articles.length ? (
         <div className="mt-4 space-y-3">
           {articles.map((article) => {
             const visibleTags = article.tags.slice(0, 5);

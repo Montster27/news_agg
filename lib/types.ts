@@ -22,6 +22,21 @@ export type Article = {
   importance: 1 | 2 | 3 | 4 | 5;
 };
 
+export type StoryCluster = {
+  id: string;
+  headline: string;
+  summary: string;
+  why_it_matters: string;
+  articles: Article[];
+  sources: string[];
+  tags: string[];
+  domain: string;
+  impactScore: number;
+  confidence: "low" | "medium" | "high";
+  created_at: string;
+  updated_at: string;
+};
+
 export type ImportanceFeedback = {
   articleId: string;
   originalImportance: 1 | 2 | 3 | 4 | 5;

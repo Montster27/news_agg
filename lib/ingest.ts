@@ -1,9 +1,11 @@
 import { processArticlesInBatches } from "@/lib/ai";
+import { clusterArticles, deduplicateArticles } from "@/lib/clustering";
 import { saveArticlesToDb } from "@/lib/db";
 import Parser from "rss-parser";
 import { fallbackArticles } from "@/lib/data";
 import { sources, type RssSource } from "@/lib/sources";
-import { Article } from "@/lib/types";
+import { Article, StoryCluster } from "@/lib/types";
+import { synthesizeWhyItMatters } from "@/lib/why-it-matters";
 
 const parser = new Parser();
 const ONE_HOUR = 60 * 60 * 1000;
@@ -15,6 +17,7 @@ const FEED_BATCH_PAUSE_MS = 150;
 
 type ArticleCache = {
   articles: Article[];
+  clusters: StoryCluster[];
   fetchedAt: string;
 };
 
@@ -165,21 +168,6 @@ async function fetchFeed(source: RssSource) {
   }
 }
 
-function dedupeArticles(articles: Article[]) {
-  const seenHeadlines = new Set<string>();
-
-  return articles.filter((article) => {
-    const key = article.headline.trim().toLowerCase();
-
-    if (seenHeadlines.has(key)) {
-      return false;
-    }
-
-    seenHeadlines.add(key);
-    return true;
-  });
-}
-
 async function fetchFeedsWithThrottle() {
   const results: Article[][] = [];
 
@@ -197,16 +185,19 @@ async function fetchFeedsWithThrottle() {
 
 async function refreshFeeds() {
   const settled = await fetchFeedsWithThrottle();
-  const deduped = dedupeArticles(settled.flat())
+  const deduped = deduplicateArticles(settled.flat())
     .sort((left, right) => {
       return new Date(right.date).getTime() - new Date(left.date).getTime();
     })
     .slice(0, MAX_DASHBOARD_ARTICLES);
 
   const enriched = await processArticlesInBatches(deduped);
+  const articles = enriched.length ? enriched : fallbackArticles;
+  const clusters = await synthesizeWhyItMatters(clusterArticles(articles));
 
   const nextCache = {
-    articles: enriched.length ? enriched : fallbackArticles,
+    articles,
+    clusters,
     fetchedAt: new Date().toISOString(),
   };
 
