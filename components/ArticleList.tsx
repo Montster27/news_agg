@@ -12,6 +12,7 @@ import { Tag } from "@/components/Tag";
 
 type ArticleListProps = {
   articles: Article[];
+  allArticles?: Article[];
   clusters?: StoryCluster[];
   totalArticleCount?: number;
   totalClusterCount?: number;
@@ -30,6 +31,7 @@ type ArticleListProps = {
 
 export function ArticleList({
   articles,
+  allArticles,
   clusters = [],
   totalArticleCount,
   totalClusterCount,
@@ -44,6 +46,7 @@ export function ArticleList({
 }: ArticleListProps) {
   const clusterCount = totalClusterCount ?? clusters.length;
   const articleCount = totalArticleCount ?? articles.length;
+  const articleLookup = new Map((allArticles ?? articles).map((article) => [article.id, article]));
 
   return (
     <section className="surface-card p-4 sm:p-6">
@@ -64,11 +67,13 @@ export function ArticleList({
           {clusters.map((cluster) => {
             const visibleTags = cluster.tags.slice(0, 5);
             const hiddenTagCount = cluster.tags.length - visibleTags.length;
-            const bullets = cluster.why_it_matters
-              .split(/\n+/)
-              .map((item) => item.replace(/^[-*]\s*/, "").trim())
-              .filter(Boolean)
-              .slice(0, 3);
+            const bullets = cluster.whyItMatters.slice(0, 3);
+            const memberArticles = cluster.articleIds
+              .map((id) => articleLookup.get(id))
+              .filter((article): article is Article => Boolean(article));
+            const visibleEntities = cluster.entities
+              .filter((entity) => entity.type !== "other")
+              .slice(0, 5);
 
             return (
               <article
@@ -81,8 +86,8 @@ export function ArticleList({
                       <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-800">
                         {cluster.domain}
                       </span>
-                      <span>{cluster.sources.length} sources</span>
-                      <span>{cluster.articles.length} articles</span>
+                      <span>{cluster.sourceCount} sources</span>
+                      <span>{cluster.articleIds.length} articles</span>
                       <span
                         className={`rounded-full px-2.5 py-1 ${
                           cluster.confidence === "high"
@@ -129,12 +134,21 @@ export function ArticleList({
                     <span className="tag-pill">+{hiddenTagCount}</span>
                   ) : null}
                 </div>
+                {visibleEntities.length ? (
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+                    {visibleEntities.map((entity) => (
+                      <span key={entity.normalized} className="rounded-full bg-slate-50 px-2 py-1">
+                        {entity.name}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
                 <details className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
                   <summary className="cursor-pointer font-medium text-slate-800">
                     Raw articles
                   </summary>
                   <div className="mt-3 space-y-3">
-                    {cluster.articles.slice(0, 8).map((article) => (
+                    {memberArticles.slice(0, 8).map((article) => (
                       <div key={article.id} className="border-t border-slate-200 pt-3">
                         <div className="font-medium text-slate-900">{article.headline}</div>
                         <div className="mt-1 text-xs text-slate-500">
@@ -152,9 +166,14 @@ export function ArticleList({
                         ) : null}
                       </div>
                     ))}
-                    {cluster.articles.length > 8 ? (
+                    {cluster.articleIds.length > 8 ? (
                       <div className="border-t border-slate-200 pt-3 text-xs text-slate-500">
-                        {cluster.articles.length - 8} more raw articles in this cluster.
+                        {cluster.articleIds.length - 8} more raw articles in this cluster.
+                      </div>
+                    ) : null}
+                    {!memberArticles.length ? (
+                      <div className="border-t border-slate-200 pt-3 text-xs text-slate-500">
+                        Raw articles are still stored, but none are loaded in this view.
                       </div>
                     ) : null}
                   </div>

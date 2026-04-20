@@ -1,6 +1,7 @@
 import type { Article } from "./types";
 
 const HEADLINE_SIMILARITY_THRESHOLD = 0.78;
+const STORY_SIMILARITY_THRESHOLD = 0.64;
 const STOP_WORDS = new Set([
   "a",
   "an",
@@ -26,7 +27,7 @@ const STOP_WORDS = new Set([
   "with",
 ]);
 
-export function normalizeUrl(url?: string) {
+export function normalizeUrl(url = "") {
   if (!url) {
     return "";
   }
@@ -134,4 +135,20 @@ export function isDuplicate(articleA: Article, articleB: Article) {
   }
 
   return headlineSimilarity(articleA.headline, articleB.headline) > HEADLINE_SIMILARITY_THRESHOLD;
+}
+
+export function isLikelySameStory(articleA: Article, articleB: Article) {
+  if (isDuplicate(articleA, articleB)) {
+    return true;
+  }
+
+  const similarity = headlineSimilarity(articleA.headline, articleB.headline);
+  const sharedTags = articleA.tags.filter((tag) => articleB.tags.includes(tag)).length;
+  const sameDomain = articleA.domain === articleB.domain;
+
+  if (similarity >= STORY_SIMILARITY_THRESHOLD && (sameDomain || sharedTags > 0)) {
+    return true;
+  }
+
+  return similarity >= 0.55 && sameDomain && sharedTags >= 2;
 }

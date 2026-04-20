@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { clusterArticles } from "./clustering";
-import { isDuplicate, normalizeUrl } from "./dedup";
-import { computeImpactScore } from "./scoring";
+import { isLikelySameStory, normalizeUrl } from "./dedup";
+import { computeClusterConfidence, computeClusterImpactScore } from "./scoring";
+import { extractEntities } from "./entities";
 import type { Article } from "./types";
 
 function article(overrides: Partial<Article> = {}): Article {
@@ -32,7 +33,7 @@ describe("story clustering", () => {
     });
 
     expect(normalizeUrl(first.url)).toBe("https://example.com/story");
-    expect(isDuplicate(first, second)).toBe(true);
+    expect(isLikelySameStory(first, second)).toBe(true);
   });
 
   it("groups similar stories into source-backed clusters", () => {
@@ -58,8 +59,9 @@ describe("story clustering", () => {
     ]);
 
     expect(clusters).toHaveLength(2);
-    expect(clusters[0].sources).toHaveLength(2);
+    expect(clusters[0].sourceCount).toBe(2);
     expect(clusters[0].confidence).toBe("medium");
+    expect(clusters[0].articleIds).toHaveLength(2);
   });
 
   it("assigns higher impact to multi-source strategic clusters", () => {
@@ -85,7 +87,33 @@ describe("story clustering", () => {
       }),
     ]);
 
-    expect(computeImpactScore(multiSource)).toBeGreaterThan(computeImpactScore(singleSource));
+    expect(computeClusterImpactScore(multiSource, [
+      article(),
+      article({
+        id: "article-2",
+        source: "Source B",
+        url: "https://source-b.test/openai-data-centers",
+        headline: "OpenAI adds data center capacity for inference growth",
+      }),
+      article({
+        id: "article-3",
+        source: "Source C",
+        url: "https://source-c.test/openai-infra",
+        headline: "OpenAI infrastructure buildout targets inference demand",
+      }),
+    ])).toBeGreaterThan(computeClusterImpactScore(singleSource, [article({
+      tags: ["general"],
+      importance: 2,
+    })]));
     expect(multiSource.confidence).toBe("high");
+    expect(computeClusterConfidence(multiSource)).toBe("high");
+  });
+
+  it("extracts normalized companies and technologies", () => {
+    const entities = extractEntities(article());
+    const normalized = entities.map((entity) => entity.normalized);
+
+    expect(normalized).toContain("openai");
+    expect(entities.some((entity) => entity.type === "technology")).toBe(true);
   });
 });

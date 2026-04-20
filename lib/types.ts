@@ -22,19 +22,29 @@ export type Article = {
   importance: 1 | 2 | 3 | 4 | 5;
 };
 
+export type EntityType = "company" | "person" | "product" | "technology" | "place" | "other";
+
+export type ExtractedEntity = {
+  name: string;
+  type: EntityType;
+  normalized: string;
+};
+
 export type StoryCluster = {
   id: string;
   headline: string;
   summary: string;
-  why_it_matters: string;
-  articles: Article[];
-  sources: string[];
+  whyItMatters: string[];
+  domain: ArticleDomain;
   tags: string[];
-  domain: string;
-  impactScore: number;
+  entities: ExtractedEntity[];
+  articleIds: string[];
+  sources: string[];
+  sourceCount: number;
   confidence: "low" | "medium" | "high";
-  created_at: string;
-  updated_at: string;
+  impactScore: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
 };
 
 export type ImportanceFeedback = {

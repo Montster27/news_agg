@@ -27,7 +27,7 @@ type TopSignalsProps = {
 };
 
 export function TopSignals({
-  articles,
+  articles = [],
   clusters,
   activeTags,
   personalizedView,
@@ -61,11 +61,10 @@ export function TopSignals({
           {rankedClusters.map((cluster) => {
             const visibleTags = cluster.tags.slice(0, 5);
             const hiddenTagCount = cluster.tags.length - visibleTags.length;
-            const bullets = cluster.why_it_matters
-              .split(/\n+/)
-              .map((item) => item.replace(/^[-*]\s*/, "").trim())
-              .filter(Boolean)
-              .slice(0, 3);
+            const bullets = cluster.whyItMatters.slice(0, 3);
+            const visibleEntities = cluster.entities
+              .filter((entity) => entity.type !== "other")
+              .slice(0, 4);
 
             return (
               <article
@@ -78,7 +77,7 @@ export function TopSignals({
                       <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-800">
                         {cluster.domain}
                       </span>
-                      <span>{cluster.sources.length} sources</span>
+                      <span>{cluster.sourceCount} sources</span>
                       <span
                         className={`rounded-full px-2.5 py-1 ${
                           cluster.confidence === "high"
@@ -119,6 +118,15 @@ export function TopSignals({
                         ) : null}
                       </div>
                     ) : null}
+                    {visibleEntities.length ? (
+                      <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+                        {visibleEntities.map((entity) => (
+                          <span key={entity.normalized} className="rounded-full bg-slate-50 px-2 py-1">
+                            {entity.name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="w-full shrink-0 rounded-xl border border-slate-200 bg-slate-50 p-3 text-left sm:w-32 sm:text-right">
                     <div className="text-[11px] font-semibold uppercase text-slate-500">
@@ -128,7 +136,7 @@ export function TopSignals({
                       {cluster.impactScore.toFixed(1)}
                     </div>
                     <div className="mt-1 text-xs text-slate-500">
-                      {cluster.articles.length} articles
+                      {cluster.articleIds.length} articles
                     </div>
                   </div>
                 </div>
@@ -136,7 +144,7 @@ export function TopSignals({
             );
           })}
         </div>
-      ) : articles?.length ? (
+      ) : articles.length ? (
         <div className="mt-6 grid gap-4 xl:grid-cols-2">
           {articles.map((article) => {
             const visibleTags = article.tags.slice(0, 5);

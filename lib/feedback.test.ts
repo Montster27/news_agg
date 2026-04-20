@@ -5,8 +5,8 @@ import {
   parseImportanceFeedback,
   rebuildLearningProfile,
 } from "./feedback";
-import { scoreArticle, type UserProfile } from "./user";
-import type { Article, ImportanceFeedback } from "./types";
+import { scoreArticle, scoreStoryCluster, type UserProfile } from "./user";
+import type { Article, ImportanceFeedback, StoryCluster } from "./types";
 
 const baseProfile: UserProfile = {
   preferred_domains: [],
@@ -29,6 +29,26 @@ function article(overrides: Partial<Article> = {}): Article {
     summary: "Operators are shifting infrastructure plans around power constraints.",
     tags: ["ai_infrastructure", "energy_constraint"],
     importance: 3,
+    ...overrides,
+  };
+}
+
+function cluster(overrides: Partial<StoryCluster> = {}): StoryCluster {
+  return {
+    id: "cluster-1",
+    headline: "AI data centers strain power supply",
+    summary: "Operators are shifting infrastructure plans around power constraints.",
+    whyItMatters: ["Business", "Technical", "Watch"],
+    domain: "AI",
+    tags: ["ai_infrastructure", "energy_constraint"],
+    entities: [{ name: "AI", normalized: "ai", type: "technology" }],
+    articleIds: ["a1"],
+    sources: ["Source A"],
+    sourceCount: 1,
+    confidence: "low",
+    impactScore: 6,
+    firstSeenAt: "2026-04-18T00:00:00.000Z",
+    lastSeenAt: "2026-04-18T00:00:00.000Z",
     ...overrides,
   };
 }
@@ -131,5 +151,15 @@ describe("importance feedback", () => {
 
     expect(getEffectiveImportance(target, {})).toBe(3);
     expect(scoreArticle(target, baseProfile, {})).toBe(3);
+  });
+
+  it("scores story clusters with profile tag and domain alignment", () => {
+    const profile: UserProfile = {
+      ...baseProfile,
+      preferred_domains: ["AI"],
+      preferred_tags: ["ai_infrastructure"],
+    };
+
+    expect(scoreStoryCluster(cluster(), profile)).toBeGreaterThan(cluster().impactScore);
   });
 });

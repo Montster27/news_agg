@@ -32,7 +32,7 @@ declare global {
     startedAt?: string;
     completedAt?: string;
     trigger?: "manual" | "scheduled" | "launch";
-    skipReason?: "battery" | "running";
+    skipReason?: "battery" | "running" | "memory";
     power?: DesktopPowerState;
     resourceImpact?: DesktopResourceImpact | null;
     error?: string;

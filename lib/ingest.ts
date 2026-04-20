@@ -1,11 +1,11 @@
 import { processArticlesInBatches } from "@/lib/ai";
 import { clusterArticles, deduplicateArticles } from "@/lib/clustering";
-import { saveArticlesToDb } from "@/lib/db";
+import { saveArticlesToDb, saveStoryClustersToDb } from "@/lib/db";
 import Parser from "rss-parser";
 import { fallbackArticles } from "@/lib/data";
 import { sources, type RssSource } from "@/lib/sources";
 import { Article, StoryCluster } from "@/lib/types";
-import { synthesizeWhyItMatters } from "@/lib/why-it-matters";
+import { synthesizeWhyItMatters } from "@/lib/story-synthesis";
 
 const parser = new Parser();
 const ONE_HOUR = 60 * 60 * 1000;
@@ -17,6 +17,7 @@ const FEED_BATCH_PAUSE_MS = 150;
 
 type ArticleCache = {
   articles: Article[];
+  storyClusters: StoryCluster[];
   clusters: StoryCluster[];
   fetchedAt: string;
 };
@@ -193,15 +194,17 @@ async function refreshFeeds() {
 
   const enriched = await processArticlesInBatches(deduped);
   const articles = enriched.length ? enriched : fallbackArticles;
-  const clusters = await synthesizeWhyItMatters(clusterArticles(articles));
+  const storyClusters = await synthesizeWhyItMatters(clusterArticles(articles), articles);
 
   const nextCache = {
     articles,
-    clusters,
+    storyClusters,
+    clusters: storyClusters,
     fetchedAt: new Date().toISOString(),
   };
 
   await saveArticlesToDb(nextCache.articles);
+  await saveStoryClustersToDb(nextCache.storyClusters);
   articleCache = nextCache;
   return nextCache;
 }

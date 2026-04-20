@@ -1,6 +1,7 @@
-import { headlineSimilarity, isDuplicate, tokenizeText } from "./dedup";
-import { computeImpactScore } from "./scoring";
-import type { Article, StoryCluster } from "./types";
+import { headlineSimilarity, isDuplicate, isLikelySameStory, tokenizeText } from "./dedup";
+import { extractEntities, mergeEntities } from "./entities";
+import { computeClusterConfidence, computeClusterImpactScore } from "./scoring";
+import type { Article, ArticleDomain, StoryCluster } from "./types";
 
 const CLUSTER_HEADLINE_THRESHOLD = 0.58;
 const ENTITY_OVERLAP_THRESHOLD = 1;
@@ -42,17 +43,6 @@ function unique(values: Array<string | undefined>) {
   return Array.from(new Set(values.filter((value): value is string => Boolean(value))));
 }
 
-function extractEntities(article: Article) {
-  const text = `${article.headline} ${article.summary}`;
-  const matches = text.match(/\b[A-Z][A-Za-z0-9&.-]*(?:\s+[A-Z][A-Za-z0-9&.-]*){0,3}\b/g) ?? [];
-
-  return unique(
-    matches
-      .map((match) => match.trim())
-      .filter((match) => match.length > 2 && !["The", "This", "That"].includes(match)),
-  );
-}
-
 function extractTopicKeywords(article: Article) {
   const tokens = tokenizeText(`${article.headline} ${article.summary} ${article.tags.join(" ")}`);
   return unique(tokens.filter((token) => TOPIC_KEYWORDS.has(token) || article.tags.includes(token)));
@@ -63,10 +53,16 @@ function overlapCount(left: string[], right: string[]) {
   return left.filter((value) => rightSet.has(value.toLowerCase())).length;
 }
 
-function confidenceForSources(sourceCount: number): StoryCluster["confidence"] {
-  if (sourceCount >= 3) return "high";
-  if (sourceCount === 2) return "medium";
-  return "low";
+function primaryDomain(articles: Article[]): ArticleDomain {
+  const domainCounts = new Map<ArticleDomain, number>();
+
+  for (const article of articles) {
+    domainCounts.set(article.domain, (domainCounts.get(article.domain) ?? 0) + 1);
+  }
+
+  return [...domainCounts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ??
+    articles[0]?.domain ??
+    "General";
 }
 
 function clusterSummary(articles: Article[]) {
@@ -82,65 +78,27 @@ function clusterSummary(articles: Article[]) {
   return `${lead.summary} Tracked across ${articles.length} articles from ${sourceCount} sources.`;
 }
 
-export function fallbackWhyItMatters(cluster: Pick<StoryCluster, "tags" | "domain" | "sources">) {
+export function fallbackWhyItMatters(
+  cluster: Pick<StoryCluster, "tags" | "domain" | "sources" | "entities">,
+) {
   const leadTag = cluster.tags[0]?.replace(/_/g, " ") ?? "this signal";
+  const leadEntity = cluster.entities.find((entity) => entity.type !== "other")?.name;
+  const subject = leadEntity ?? leadTag;
   const sourceText =
     cluster.sources.length > 1
       ? `${cluster.sources.length} sources are reinforcing the story`
       : "one source is reporting the story";
 
   return [
-    `Strategic impact: ${sourceText}, making ${leadTag} worth tracking in ${cluster.domain}.`,
-    `Technical implication: the coverage points to execution constraints around ${leadTag}.`,
-    "Future direction: watch for follow-on reporting, customer adoption, regulation, or supply-chain effects.",
-  ].join("\n");
-}
-
-function buildCluster(articles: Article[], createdAt: string): StoryCluster {
-  const sorted = [...articles].sort((left, right) => {
-    return (
-      right.importance - left.importance ||
-      new Date(right.date).getTime() - new Date(left.date).getTime()
-    );
-  });
-  const lead = sorted[0];
-  const updatedAt = new Date(
-    Math.max(...articles.map((article) => new Date(article.processed_at || article.date).getTime())),
-  ).toISOString();
-  const tags = unique(articles.flatMap((article) => article.tags)).slice(0, 8);
-  const sources = unique(articles.map((article) => article.source));
-  const domainCounts = new Map<string, number>();
-
-  for (const article of articles) {
-    domainCounts.set(article.domain, (domainCounts.get(article.domain) ?? 0) + 1);
-  }
-
-  const domain =
-    [...domainCounts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ??
-    lead.domain;
-  const cluster: StoryCluster = {
-    id: `cluster-${stableSlug(lead.headline || lead.id)}`,
-    headline: lead.headline,
-    summary: clusterSummary(sorted),
-    why_it_matters: "",
-    articles: sorted,
-    sources,
-    tags,
-    domain,
-    impactScore: 1,
-    confidence: confidenceForSources(sources.length),
-    created_at: createdAt,
-    updated_at: updatedAt,
-  };
-
-  cluster.impactScore = computeImpactScore(cluster);
-  cluster.why_it_matters = fallbackWhyItMatters(cluster);
-  return cluster;
+    `${sourceText}, making ${subject} worth tracking in ${cluster.domain}.`,
+    `The technical implication centers on execution constraints around ${leadTag}.`,
+    "Watch for follow-on reporting, customer adoption, regulation, or supply-chain effects.",
+  ];
 }
 
 function belongsInCluster(article: Article, clusterArticles: Article[]) {
   return clusterArticles.some((candidate) => {
-    if (isDuplicate(article, candidate)) {
+    if (isLikelySameStory(article, candidate)) {
       return true;
     }
 
@@ -148,7 +106,10 @@ function belongsInCluster(article: Article, clusterArticles: Article[]) {
       return true;
     }
 
-    const entityOverlap = overlapCount(extractEntities(article), extractEntities(candidate));
+    const entityOverlap = overlapCount(
+      extractEntities(article).map((entity) => entity.normalized),
+      extractEntities(candidate).map((entity) => entity.normalized),
+    );
     if (entityOverlap >= ENTITY_OVERLAP_THRESHOLD) {
       return true;
     }
@@ -159,6 +120,45 @@ function belongsInCluster(article: Article, clusterArticles: Article[]) {
     );
     return topicOverlap >= TOPIC_OVERLAP_THRESHOLD;
   });
+}
+
+function buildCluster(articles: Article[]): StoryCluster {
+  const sorted = [...articles].sort((left, right) => {
+    return (
+      right.importance - left.importance ||
+      new Date(right.date).getTime() - new Date(left.date).getTime()
+    );
+  });
+  const lead = sorted[0];
+  const times = articles.map((article) =>
+    new Date(article.processed_at || article.date).getTime(),
+  );
+  const firstSeenAt = new Date(Math.min(...times)).toISOString();
+  const lastSeenAt = new Date(Math.max(...times)).toISOString();
+  const tags = unique(articles.flatMap((article) => article.tags)).slice(0, 8);
+  const sources = unique(articles.map((article) => article.source));
+  const entities = mergeEntities(articles.map((article) => extractEntities(article))).slice(0, 12);
+  const cluster: StoryCluster = {
+    id: `cluster-${stableSlug(lead.headline || lead.id)}`,
+    headline: lead.headline,
+    summary: clusterSummary(sorted),
+    whyItMatters: [],
+    domain: primaryDomain(articles),
+    tags,
+    entities,
+    articleIds: sorted.map((article) => article.id),
+    sources,
+    sourceCount: sources.length,
+    confidence: "low",
+    impactScore: 1,
+    firstSeenAt,
+    lastSeenAt,
+  };
+
+  cluster.confidence = computeClusterConfidence(cluster);
+  cluster.impactScore = computeClusterImpactScore(cluster, articles);
+  cluster.whyItMatters = fallbackWhyItMatters(cluster);
+  return cluster;
 }
 
 export function deduplicateArticles(articles: Article[]) {
@@ -181,7 +181,6 @@ export function deduplicateArticles(articles: Article[]) {
 }
 
 export function clusterArticles(articles: Article[]) {
-  const createdAt = new Date().toISOString();
   const groups: Article[][] = [];
   const sortedArticles = [...articles].sort((left, right) => {
     return (
@@ -201,6 +200,6 @@ export function clusterArticles(articles: Article[]) {
   }
 
   return groups
-    .map((group) => buildCluster(group, createdAt))
+    .map((group) => buildCluster(group))
     .sort((left, right) => right.impactScore - left.impactScore);
 }

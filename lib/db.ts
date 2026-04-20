@@ -3,7 +3,7 @@ import "server-only";
 import { Pool } from "pg";
 import type { WeeklyBrief } from "@/lib/brief";
 import type { PatternAnalysis } from "@/lib/patterns";
-import type { Article, ArticleDomain } from "@/lib/types";
+import type { Article, ArticleDomain, ExtractedEntity, StoryCluster } from "@/lib/types";
 
 const databaseUrl =
   process.env.POSTGRES_URL && process.env.POSTGRES_URL !== "your_vercel_db_url"
@@ -20,6 +20,36 @@ type StoredPatternRow = {
   count: number;
   delta: number;
   domain: string;
+};
+
+type StoredStoryClusterRow = {
+  id: string;
+  headline: string;
+  summary: string;
+  why_it_matters: string[];
+  domain: ArticleDomain;
+  tags: string[];
+  entities: ExtractedEntity[];
+  sources: string[];
+  source_count: number;
+  confidence: StoryCluster["confidence"];
+  impact_score: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  article_ids?: string[];
+};
+
+type StoredArticleRow = {
+  id: string;
+  headline: string;
+  summary: string;
+  domain: ArticleDomain;
+  tags: string[];
+  importance: Article["importance"];
+  source: string | null;
+  url: string | null;
+  published_at: string;
+  processed_at: string;
 };
 
 export type StoredInsight = {
@@ -117,6 +147,33 @@ export async function initDb() {
     `);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS story_clusters (
+        id TEXT PRIMARY KEY,
+        headline TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        why_it_matters JSONB NOT NULL,
+        domain TEXT NOT NULL,
+        tags JSONB NOT NULL,
+        entities JSONB NOT NULL,
+        sources JSONB NOT NULL,
+        source_count INTEGER NOT NULL,
+        confidence TEXT NOT NULL,
+        impact_score REAL NOT NULL,
+        first_seen_at TIMESTAMPTZ NOT NULL,
+        last_seen_at TIMESTAMPTZ NOT NULL
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS story_cluster_articles (
+        cluster_id TEXT NOT NULL,
+        article_id TEXT NOT NULL,
+        PRIMARY KEY (cluster_id, article_id),
+        FOREIGN KEY (cluster_id) REFERENCES story_clusters(id) ON DELETE CASCADE
+      );
+    `);
+
+    await pool.query(`
       CREATE INDEX IF NOT EXISTS articles_published_at_idx
       ON articles (published_at DESC);
     `);
@@ -129,6 +186,21 @@ export async function initDb() {
     await pool.query(`
       CREATE INDEX IF NOT EXISTS patterns_week_domain_idx
       ON patterns (week DESC, domain);
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS story_clusters_impact_score_idx
+      ON story_clusters (impact_score DESC);
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS story_clusters_last_seen_at_idx
+      ON story_clusters (last_seen_at DESC);
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS story_clusters_domain_idx
+      ON story_clusters (domain);
     `);
 
     initialized = true;
@@ -182,6 +254,162 @@ export async function saveArticlesToDb(articles: Article[]) {
       ],
     );
   }
+}
+
+function storyClusterFromRow(row: StoredStoryClusterRow): StoryCluster {
+  return {
+    id: row.id,
+    headline: row.headline,
+    summary: row.summary,
+    whyItMatters: row.why_it_matters ?? [],
+    domain: row.domain,
+    tags: row.tags ?? [],
+    entities: row.entities ?? [],
+    articleIds: row.article_ids ?? [],
+    sources: row.sources ?? [],
+    sourceCount: row.source_count,
+    confidence: row.confidence,
+    impactScore: Number(row.impact_score),
+    firstSeenAt: new Date(row.first_seen_at).toISOString(),
+    lastSeenAt: new Date(row.last_seen_at).toISOString(),
+  };
+}
+
+export async function saveStoryClustersToDb(clusters: StoryCluster[]) {
+  if (!pool || !clusters.length) {
+    return;
+  }
+
+  await initDb();
+
+  for (const cluster of clusters) {
+    await pool.query(
+      `
+        INSERT INTO story_clusters (
+          id,
+          headline,
+          summary,
+          why_it_matters,
+          domain,
+          tags,
+          entities,
+          sources,
+          source_count,
+          confidence,
+          impact_score,
+          first_seen_at,
+          last_seen_at
+        )
+        VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13)
+        ON CONFLICT (id) DO UPDATE SET
+          headline = EXCLUDED.headline,
+          summary = EXCLUDED.summary,
+          why_it_matters = EXCLUDED.why_it_matters,
+          domain = EXCLUDED.domain,
+          tags = EXCLUDED.tags,
+          entities = EXCLUDED.entities,
+          sources = EXCLUDED.sources,
+          source_count = EXCLUDED.source_count,
+          confidence = EXCLUDED.confidence,
+          impact_score = EXCLUDED.impact_score,
+          first_seen_at = LEAST(story_clusters.first_seen_at, EXCLUDED.first_seen_at),
+          last_seen_at = GREATEST(story_clusters.last_seen_at, EXCLUDED.last_seen_at)
+      `,
+      [
+        cluster.id,
+        cluster.headline,
+        cluster.summary,
+        JSON.stringify(cluster.whyItMatters),
+        cluster.domain,
+        JSON.stringify(cluster.tags),
+        JSON.stringify(cluster.entities),
+        JSON.stringify(cluster.sources),
+        cluster.sourceCount,
+        cluster.confidence,
+        cluster.impactScore,
+        cluster.firstSeenAt,
+        cluster.lastSeenAt,
+      ],
+    );
+
+    await pool.query("DELETE FROM story_cluster_articles WHERE cluster_id = $1", [cluster.id]);
+
+    for (const articleId of cluster.articleIds) {
+      await pool.query(
+        `
+          INSERT INTO story_cluster_articles (cluster_id, article_id)
+          VALUES ($1, $2)
+          ON CONFLICT (cluster_id, article_id) DO NOTHING
+        `,
+        [cluster.id, articleId],
+      );
+    }
+  }
+}
+
+export async function getLatestStoryClusters(
+  domain: ArticleDomain | "All" = "All",
+  limit = 25,
+) {
+  if (!pool) {
+    return [];
+  }
+
+  await initDb();
+  const params: Array<string | number> = [limit];
+  const domainClause =
+    domain === "All"
+      ? ""
+      : `WHERE c.domain = $${params.push(domain)}`;
+
+  const result = await pool.query<StoredStoryClusterRow>(
+    `
+      SELECT
+        c.*,
+        COALESCE(json_agg(sca.article_id ORDER BY sca.article_id) FILTER (WHERE sca.article_id IS NOT NULL), '[]') AS article_ids
+      FROM story_clusters c
+      LEFT JOIN story_cluster_articles sca ON sca.cluster_id = c.id
+      ${domainClause}
+      GROUP BY c.id
+      ORDER BY c.impact_score DESC, c.last_seen_at DESC
+      LIMIT $1
+    `,
+    params,
+  );
+
+  return result.rows.map(storyClusterFromRow);
+}
+
+export async function getClusterArticles(clusterId: string) {
+  if (!pool) {
+    return [];
+  }
+
+  await initDb();
+  const result = await pool.query<StoredArticleRow>(
+    `
+      SELECT a.*
+      FROM story_cluster_articles sca
+      JOIN articles a ON a.id = sca.article_id
+      WHERE sca.cluster_id = $1
+      ORDER BY a.published_at DESC
+    `,
+    [clusterId],
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    date: new Date(row.published_at).toISOString().slice(0, 10),
+    processed_at: new Date(row.processed_at).toISOString(),
+    week: new Date(row.published_at).toISOString().slice(0, 7),
+    domain: row.domain,
+    headline: row.headline,
+    summary: row.summary,
+    source: row.source ?? undefined,
+    url: row.url ?? undefined,
+    tags: row.tags ?? [],
+    importance: row.importance,
+  }));
 }
 
 function rowsFromAnalysis(analysis: PatternAnalysis): StoredPatternRow[] {

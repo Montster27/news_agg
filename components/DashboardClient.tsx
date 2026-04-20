@@ -8,6 +8,7 @@ import { Article, StoryCluster } from "@/lib/types";
 
 type RssResponse = {
   articles: Article[];
+  storyClusters?: StoryCluster[];
   clusters?: StoryCluster[];
   fetchedAt: string;
 };
@@ -38,7 +39,7 @@ export function DashboardClient() {
 
         if (!cancelled) {
           setArticles(payload.articles);
-          setClusters(payload.clusters ?? []);
+          setClusters(payload.storyClusters ?? payload.clusters ?? []);
           setFetchedAt(payload.fetchedAt);
           setError(null);
         }
@@ -98,10 +99,14 @@ export function DashboardClient() {
   }, [activeCategory, activeSource, activeTags, articles]);
 
   const latestArticles = filteredArticles.slice(0, 24);
+  const articleLookup = new Map(articles.map((article) => [article.id, article]));
   const filteredClusters = clusters.filter((cluster) => {
+    const memberArticles = cluster.articleIds
+      .map((id) => articleLookup.get(id))
+      .filter((article): article is Article => Boolean(article));
     const sourceMatches =
       activeSource === "All sources" ||
-      cluster.articles.some((article) => article.source === activeSource);
+      memberArticles.some((article) => article.source === activeSource);
     const categoryMatches =
       activeCategory === "All categories" || cluster.domain === activeCategory;
     const tagMatches =

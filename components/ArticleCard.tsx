@@ -32,11 +32,10 @@ export function ArticleCard({
   const [expanded, setExpanded] = useState(false);
 
   if (cluster) {
-    const bullets = cluster.why_it_matters
-      .split(/\n+/)
-      .map((item) => item.replace(/^[-*]\s*/, "").trim())
-      .filter(Boolean)
-      .slice(0, 3);
+    const bullets = cluster.whyItMatters.slice(0, 3);
+    const visibleEntities = cluster.entities
+      .filter((entity) => entity.type !== "other")
+      .slice(0, 4);
 
     return (
       <article
@@ -48,7 +47,7 @@ export function ArticleCard({
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
               <span>{cluster.domain}</span>
-              <span>{cluster.sources.length} sources</span>
+              <span>{cluster.sourceCount} sources</span>
               <span>{cluster.confidence} confidence</span>
             </div>
             <h3 className="text-lg font-semibold text-ink">{cluster.headline}</h3>
@@ -72,6 +71,16 @@ export function ArticleCard({
           </div>
         ) : null}
 
+        {visibleEntities.length ? (
+          <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
+            {visibleEntities.map((entity) => (
+              <span key={entity.normalized} className="rounded-full bg-mist px-2 py-1">
+                {entity.name}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
         <button
           type="button"
           onClick={() => setExpanded((current) => !current)}
@@ -89,7 +98,7 @@ export function ArticleCard({
               ))}
             </ul>
             <div className="text-xs text-slate-500">
-              Raw articles: {cluster.articles.length}
+              Raw articles: {cluster.articleIds.length}
             </div>
           </div>
         ) : null}

@@ -74,9 +74,14 @@ export async function POST(request: NextRequest) {
   const cluster = clusters[0]
     ? {
         ...clusters[0],
-        why_it_matters: await generateWhyItMatters(clusters[0]),
+        whyItMatters: await generateWhyItMatters(clusters[0], [article]),
       }
     : null;
 
-  return NextResponse.json({ article, cluster, clusters: cluster ? [cluster] : [] });
+  return NextResponse.json({
+    article,
+    cluster,
+    storyClusters: cluster ? [cluster] : [],
+    clusters: cluster ? [cluster] : [],
+  });
 }

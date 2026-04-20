@@ -19,6 +19,7 @@ import { DesktopControls } from "@/components/DesktopControls";
 import { FiltersBar } from "@/components/FiltersBar";
 import { SearchCommandPanel } from "@/components/SearchCommandPanel";
 import { TopSignals } from "@/components/TopSignals";
+import { extractEntities, mergeEntities } from "@/lib/entities";
 import type {
   Article,
   ArticleDomain,
@@ -35,6 +36,7 @@ import {
   loadUserProfile,
   saveUserProfile,
   scoreArticle,
+  scoreStoryCluster,
   type UserProfile,
 } from "@/lib/user";
 
@@ -70,6 +72,7 @@ const VISIBLE_ARTICLE_LIMIT = 120;
 
 type CommandCenterClientProps = {
   articles: Article[];
+  storyClusters?: StoryCluster[];
   clusters?: StoryCluster[];
   brief: WeeklyBrief;
   patterns: PatternAnalysis;
@@ -199,10 +202,10 @@ function clientWhyItMatters(tags: string[], domain: string, sourceCount: number)
       : "one source is reporting the story";
 
   return [
-    `Strategic impact: ${sourceText}, making ${leadTag} worth tracking in ${domain}.`,
-    `Technical implication: the coverage points to execution constraints around ${leadTag}.`,
+    `${sourceText}, making ${leadTag} worth tracking in ${domain}.`,
+    `The technical implication centers on execution constraints around ${leadTag}.`,
     "Future direction: watch for follow-on reporting, customer adoption, regulation, or supply-chain effects.",
-  ].join("\n");
+  ];
 }
 
 function buildClientClusters(articles: Article[]) {
@@ -233,8 +236,14 @@ function buildClientClusters(articles: Article[]) {
       const lead = ranked[0];
       const sources = uniqueStrings(group.map((article) => article.source));
       const tags = uniqueStrings(group.flatMap((article) => article.tags)).slice(0, 8);
+      const entities = mergeEntities(group.map((article) => extractEntities(article))).slice(0, 12);
       const updatedAt = new Date(
         Math.max(
+          ...group.map((article) => new Date(article.processed_at || article.date).getTime()),
+        ),
+      ).toISOString();
+      const firstSeenAt = new Date(
+        Math.min(
           ...group.map((article) => new Date(article.processed_at || article.date).getTime()),
         ),
       ).toISOString();
@@ -246,15 +255,17 @@ function buildClientClusters(articles: Article[]) {
           group.length > 1
             ? `${lead.summary} Tracked across ${group.length} articles from ${sources.length} sources.`
             : lead.summary,
-        why_it_matters: clientWhyItMatters(tags, lead.domain, sources.length),
-        articles: ranked,
-        sources,
-        tags,
+        whyItMatters: clientWhyItMatters(tags, lead.domain, sources.length),
         domain: lead.domain,
-        impactScore: clientImpactScore(group, sources, tags),
+        tags,
+        entities,
+        articleIds: ranked.map((article) => article.id),
+        sources,
+        sourceCount: sources.length,
         confidence: clientConfidence(sources.length),
-        created_at: updatedAt,
-        updated_at: updatedAt,
+        impactScore: clientImpactScore(group, sources, tags),
+        firstSeenAt,
+        lastSeenAt: updatedAt,
       } satisfies StoryCluster;
     })
     .sort((left, right) => right.impactScore - left.impactScore);
@@ -262,6 +273,7 @@ function buildClientClusters(articles: Article[]) {
 
 export function CommandCenterClient({
   articles: initialArticles,
+  storyClusters: initialStoryClusters,
   clusters: initialClusters,
   brief: initialBrief,
   patterns: initialPatterns,
@@ -269,9 +281,10 @@ export function CommandCenterClient({
   insightReport: initialInsightReport,
   fetchedAt: initialFetchedAt,
 }: CommandCenterClientProps) {
+  const initialClusterData = initialStoryClusters?.length ? initialStoryClusters : initialClusters;
   const [articles, setArticles] = useState(initialArticles);
   const [clusters, setClusters] = useState<StoryCluster[]>(
-    initialClusters?.length ? initialClusters : buildClientClusters(initialArticles),
+    initialClusterData?.length ? initialClusterData : buildClientClusters(initialArticles),
   );
   const [brief, setBrief] = useState(initialBrief);
   const [patterns, setPatterns] = useState(initialPatterns);
@@ -394,6 +407,10 @@ export function CommandCenterClient({
       ]),
     );
   }, [articles, feedbackMap, learningProfile, profile]);
+  const articleLookup = useMemo(
+    () => new Map(articles.map((article) => [article.id, article])),
+    [articles],
+  );
 
   const filteredArticles = useMemo(() => {
     return articles.filter((article) => {
@@ -412,17 +429,21 @@ export function CommandCenterClient({
 
   const filteredClusters = useMemo(() => {
     return clusters.filter((cluster) => {
-      const matchesTime = cluster.articles.some((article) => withinRange(article, timeRange));
+      const memberArticles = cluster.articleIds
+        .map((id) => articleLookup.get(id))
+        .filter((article): article is Article => Boolean(article));
+      const matchesTime = memberArticles.some((article) => withinRange(article, timeRange));
       const matchesDomain = activeDomain === "All" || cluster.domain === activeDomain;
       const matchesTags =
         activeTags.length === 0 || activeTags.every((tag) => cluster.tags.includes(tag));
       const excluded =
         personalizedView &&
-        cluster.articles.every((article) => articleHasExcludedTag(article, profile));
+        memberArticles.length > 0 &&
+        memberArticles.every((article) => articleHasExcludedTag(article, profile));
 
       return matchesTime && matchesDomain && matchesTags && !excluded;
     });
-  }, [activeDomain, activeTags, clusters, personalizedView, profile, timeRange]);
+  }, [activeDomain, activeTags, articleLookup, clusters, personalizedView, profile, timeRange]);
 
   const filteredPatterns = useMemo(() => {
     const tagsToUse = activeTags.length
@@ -458,9 +479,13 @@ export function CommandCenterClient({
 
   const topSignals = useMemo(() => {
     return [...filteredClusters]
-      .sort((left, right) => right.impactScore - left.impactScore)
+      .sort((left, right) => {
+        const rightScore = personalizedView ? scoreStoryCluster(right, profile) : right.impactScore;
+        const leftScore = personalizedView ? scoreStoryCluster(left, profile) : left.impactScore;
+        return rightScore - leftScore;
+      })
       .slice(0, 5);
-  }, [filteredClusters]);
+  }, [filteredClusters, personalizedView, profile]);
 
   const sortedArticles = useMemo(() => {
     return [...filteredArticles].sort((left, right) => {
@@ -477,8 +502,12 @@ export function CommandCenterClient({
   }, [feedbackMap, filteredArticles, personalizedView, scoreLookup]);
 
   const sortedClusters = useMemo(() => {
-    return [...filteredClusters].sort((left, right) => right.impactScore - left.impactScore);
-  }, [filteredClusters]);
+    return [...filteredClusters].sort((left, right) => {
+      const rightScore = personalizedView ? scoreStoryCluster(right, profile) : right.impactScore;
+      const leftScore = personalizedView ? scoreStoryCluster(left, profile) : left.impactScore;
+      return rightScore - leftScore;
+    });
+  }, [filteredClusters, personalizedView, profile]);
   const visibleClusters = useMemo(
     () => sortedClusters.slice(0, VISIBLE_CLUSTER_LIMIT),
     [sortedClusters],
@@ -549,13 +578,15 @@ export function CommandCenterClient({
         id: cluster.id,
         headline: cluster.headline,
         summary: cluster.summary,
-        why_it_matters: cluster.why_it_matters,
+        whyItMatters: cluster.whyItMatters,
         sources: cluster.sources,
+        sourceCount: cluster.sourceCount,
         tags: cluster.tags,
+        entities: cluster.entities,
         domain: cluster.domain,
         impactScore: cluster.impactScore,
         confidence: cluster.confidence,
-        articleCount: cluster.articles.length,
+        articleCount: cluster.articleIds.length,
       })),
       feedback: feedbackMap,
       learning: learningProfile,
@@ -774,6 +805,7 @@ export function CommandCenterClient({
           <>
             <TopSignals
               clusters={topSignals}
+              articles={articles}
               activeTags={activeTags}
               personalizedView={personalizedView}
               onTagClick={toggleTag}
@@ -788,6 +820,7 @@ export function CommandCenterClient({
             <ArticleList
               articles={visibleArticles}
               clusters={visibleClusters}
+              allArticles={articles}
               totalArticleCount={sortedArticles.length}
               totalClusterCount={sortedClusters.length}
               activeTags={activeTags}

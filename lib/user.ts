@@ -3,7 +3,7 @@ import {
   getLearnedAdjustment,
   type ImportanceLearningProfile,
 } from "@/lib/feedback";
-import { Article, ArticleDomain, ImportanceFeedback } from "@/lib/types";
+import { Article, ArticleDomain, ImportanceFeedback, StoryCluster } from "@/lib/types";
 
 export type UserProfile = {
   preferred_domains: ArticleDomain[];
@@ -84,5 +84,22 @@ export function scoreArticle(
     tagMatches * profile.importance_weights.tag_match +
     domainMatch * profile.importance_weights.domain_match +
     learnedAdjustment
+  );
+}
+
+export function scoreStoryCluster(cluster: StoryCluster, profile: UserProfile) {
+  const tagMatches = cluster.tags.filter((tag) =>
+    profile.preferred_tags.includes(tag),
+  ).length;
+  const domainMatch = profile.preferred_domains.includes(cluster.domain) ? 1 : 0;
+  const excludedPenalty = cluster.tags.some((tag) => profile.excluded_tags.includes(tag))
+    ? 2
+    : 0;
+
+  return (
+    cluster.impactScore +
+    tagMatches * profile.importance_weights.tag_match +
+    domainMatch * profile.importance_weights.domain_match -
+    excludedPenalty
   );
 }
