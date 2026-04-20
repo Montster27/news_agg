@@ -13,7 +13,11 @@ export function AppShell({ children, aside, activePath }: AppShellProps) {
       <div className="grid gap-5 lg:grid-cols-[220px_minmax(0,1fr)] xl:grid-cols-[220px_minmax(0,1fr)_320px]">
         <SidebarNav activePath={activePath} />
         <div className="min-w-0">{children}</div>
-        {aside ? <div className="hidden xl:sticky xl:top-6 xl:block xl:self-start">{aside}</div> : null}
+        {aside ? (
+          <div className="hidden max-h-[calc(100vh-3rem)] overflow-y-auto overscroll-contain pr-1 xl:sticky xl:top-6 xl:block xl:self-start">
+            {aside}
+          </div>
+        ) : null}
       </div>
     </main>
   );
