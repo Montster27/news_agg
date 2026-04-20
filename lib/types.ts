@@ -86,6 +86,55 @@ export type PersonalizationRule = {
   weight: number;
 };
 
+export type TrendDirection = "up" | "down" | "flat";
+
+export type TrendSignal = {
+  tag: string;
+  direction: TrendDirection;
+  velocity: number;
+  current: number;
+  previous: number;
+  points: Array<{ period: string; count: number }>;
+};
+
+export type NarrativeDirection = "emerging" | "growing" | "stable" | "declining";
+
+export type NarrativeThread = {
+  id: string;
+  title: string;
+  summary: string;
+  direction: NarrativeDirection;
+  tags: string[];
+  entities: ExtractedEntity[];
+  clusterIds: string[];
+  timeline: Array<{
+    clusterId: string;
+    headline: string;
+    impactScore: number;
+    seenAt: string;
+  }>;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  strength: number;
+};
+
+export type ConnectionStrength = {
+  id: string;
+  source: string;
+  target: string;
+  sourceType: "tag" | "entity";
+  targetType: "tag" | "entity";
+  weight: number;
+  clusterIds: string[];
+};
+
+export type NarrativeInsightReport = {
+  whatChanged: string[];
+  emergingTrends: string[];
+  keyNarratives: string[];
+  crossDomainInsights: string[];
+};
+
 export type ImportanceFeedback = {
   articleId: string;
   originalImportance: 1 | 2 | 3 | 4 | 5;

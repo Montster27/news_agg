@@ -1,4 +1,4 @@
-import { Article, ArticleDomain } from "@/lib/types";
+import { Article, ArticleDomain, TrendSignal } from "@/lib/types";
 import { savePatternSnapshot } from "@/lib/db";
 
 const ONE_HOUR = 60 * 60 * 1000;
@@ -30,6 +30,14 @@ export type PatternAnalysis = {
   correlations: TagCorrelation[];
   insights: string[];
   generatedAt: string;
+};
+
+type PatternPoint = {
+  tag: string;
+  count: number;
+  period?: string;
+  week?: string;
+  delta?: number;
 };
 
 type PatternCacheEntry = {
@@ -124,6 +132,91 @@ function buildCorrelations(articles: Article[]) {
     })
     .sort((left, right) => right.count - left.count)
     .slice(0, 8);
+}
+
+function patternPoints(patterns: PatternAnalysis | PatternAnalysis[] | PatternPoint[]) {
+  if (Array.isArray(patterns)) {
+    if (!patterns.length) {
+      return [];
+    }
+
+    if ("topTags" in patterns[0]) {
+      return (patterns as PatternAnalysis[]).flatMap((analysis) => {
+        const period = analysis.generatedAt.slice(0, 10);
+        return analysis.topTags.map((entry) => ({
+          tag: entry.tag,
+          count: entry.count,
+          period,
+        }));
+      });
+    }
+
+    return (patterns as PatternPoint[]).map((point) => ({
+      tag: point.tag,
+      count: point.count,
+      period: point.period ?? point.week ?? "current",
+    }));
+  }
+
+  const currentPeriod = patterns.generatedAt.slice(0, 10);
+  const previousPeriod = "previous";
+  const points: PatternPoint[] = [];
+
+  for (const trend of patterns.trendingUp) {
+    points.push({ tag: trend.tag, count: trend.previous, period: previousPeriod });
+    points.push({ tag: trend.tag, count: trend.current, period: currentPeriod });
+  }
+
+  for (const tag of patterns.topTags) {
+    if (!points.some((point) => point.tag === tag.tag && point.period === currentPeriod)) {
+      points.push({ tag: tag.tag, count: tag.count, period: currentPeriod });
+    }
+  }
+
+  return points;
+}
+
+export function computeTrendSignals(
+  patterns: PatternAnalysis | PatternAnalysis[] | PatternPoint[],
+): TrendSignal[] {
+  const grouped = new Map<string, Array<{ period: string; count: number }>>();
+
+  for (const point of patternPoints(patterns)) {
+    if (!point.tag) {
+      continue;
+    }
+
+    const current = grouped.get(point.tag) ?? [];
+    current.push({
+      period: point.period ?? "current",
+      count: Number(point.count) || 0,
+    });
+    grouped.set(point.tag, current);
+  }
+
+  return Array.from(grouped.entries())
+    .map(([tag, points]) => {
+      const sorted = [...points].sort((left, right) => left.period.localeCompare(right.period));
+      const first = sorted[0]?.count ?? 0;
+      const current = sorted.at(-1)?.count ?? 0;
+      const previous = sorted.length > 1 ? sorted.at(-2)?.count ?? 0 : first;
+      const velocity = Number((current - first).toFixed(2));
+      const direction: TrendSignal["direction"] =
+        current > previous ? "up" : current < previous ? "down" : "flat";
+
+      return {
+        tag,
+        direction,
+        velocity,
+        current,
+        previous,
+        points: sorted,
+      };
+    })
+    .sort((left, right) => {
+      return Math.abs(right.velocity) - Math.abs(left.velocity) || right.current - left.current;
+    })
+    .slice(0, 12);
 }
 
 export function generateInsights(data: {

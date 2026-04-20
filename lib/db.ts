@@ -6,9 +6,12 @@ import type { PatternAnalysis } from "@/lib/patterns";
 import type {
   Article,
   ArticleDomain,
+  ConnectionStrength,
   ExtractedEntity,
+  NarrativeThread,
   PersonalizationRule,
   StoryCluster,
+  TrendSignal,
   UserAffinity,
   UserAffinityType,
   UserFeedback,
@@ -82,6 +85,41 @@ type StoredRuleRow = {
   field: PersonalizationRule["field"];
   value: string;
   weight: number;
+};
+
+type StoredNarrativeRow = {
+  id: string;
+  title: string;
+  summary: string;
+  direction: NarrativeThread["direction"];
+  tags: string[];
+  entities: ExtractedEntity[];
+  cluster_ids: string[];
+  timeline: NarrativeThread["timeline"];
+  first_seen_at: string;
+  last_seen_at: string;
+  strength: number;
+};
+
+type StoredTrendSignalRow = {
+  tag: string;
+  direction: TrendSignal["direction"];
+  velocity: number;
+  current_count: number;
+  previous_count: number;
+  points: TrendSignal["points"];
+  computed_at: string;
+};
+
+type StoredConnectionRow = {
+  id: string;
+  source: string;
+  target: string;
+  source_type: ConnectionStrength["sourceType"];
+  target_type: ConnectionStrength["targetType"];
+  weight: number;
+  cluster_ids: string[];
+  computed_at: string;
 };
 
 export type StoredInsight = {
@@ -235,6 +273,47 @@ export async function initDb() {
     `);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS narrative_threads (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        tags JSONB NOT NULL,
+        entities JSONB NOT NULL,
+        cluster_ids JSONB NOT NULL,
+        timeline JSONB NOT NULL,
+        first_seen_at TIMESTAMPTZ NOT NULL,
+        last_seen_at TIMESTAMPTZ NOT NULL,
+        strength REAL NOT NULL
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS trend_signals (
+        tag TEXT PRIMARY KEY,
+        direction TEXT NOT NULL,
+        velocity REAL NOT NULL,
+        current_count INTEGER NOT NULL,
+        previous_count INTEGER NOT NULL,
+        points JSONB NOT NULL,
+        computed_at TIMESTAMPTZ NOT NULL
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS connections (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        target TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        target_type TEXT NOT NULL,
+        weight REAL NOT NULL,
+        cluster_ids JSONB NOT NULL,
+        computed_at TIMESTAMPTZ NOT NULL
+      );
+    `);
+
+    await pool.query(`
       CREATE INDEX IF NOT EXISTS articles_published_at_idx
       ON articles (published_at DESC);
     `);
@@ -277,6 +356,26 @@ export async function initDb() {
     await pool.query(`
       CREATE INDEX IF NOT EXISTS user_affinity_type_score_idx
       ON user_affinity (type, score DESC);
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS narrative_threads_strength_idx
+      ON narrative_threads (strength DESC);
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS narrative_threads_last_seen_at_idx
+      ON narrative_threads (last_seen_at DESC);
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS trend_signals_velocity_idx
+      ON trend_signals (velocity DESC);
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS connections_weight_idx
+      ON connections (weight DESC);
     `);
 
     initialized = true;
@@ -519,6 +618,45 @@ function ruleFromRow(row: StoredRuleRow): PersonalizationRule {
   };
 }
 
+function narrativeFromRow(row: StoredNarrativeRow): NarrativeThread {
+  return {
+    id: row.id,
+    title: row.title,
+    summary: row.summary,
+    direction: row.direction,
+    tags: row.tags ?? [],
+    entities: row.entities ?? [],
+    clusterIds: row.cluster_ids ?? [],
+    timeline: row.timeline ?? [],
+    firstSeenAt: new Date(row.first_seen_at).toISOString(),
+    lastSeenAt: new Date(row.last_seen_at).toISOString(),
+    strength: Number(row.strength),
+  };
+}
+
+function trendFromRow(row: StoredTrendSignalRow): TrendSignal {
+  return {
+    tag: row.tag,
+    direction: row.direction,
+    velocity: Number(row.velocity),
+    current: Number(row.current_count),
+    previous: Number(row.previous_count),
+    points: row.points ?? [],
+  };
+}
+
+function connectionFromRow(row: StoredConnectionRow): ConnectionStrength {
+  return {
+    id: row.id,
+    source: row.source,
+    target: row.target,
+    sourceType: row.source_type,
+    targetType: row.target_type,
+    weight: Number(row.weight),
+    clusterIds: row.cluster_ids ?? [],
+  };
+}
+
 export async function saveUserFeedback(input: {
   clusterId: string;
   action: string;
@@ -624,6 +762,203 @@ export async function getRules() {
   );
 
   return result.rows.map(ruleFromRow);
+}
+
+export async function saveNarratives(narratives: NarrativeThread[]) {
+  if (!pool || !narratives.length) {
+    return;
+  }
+
+  await initDb();
+
+  for (const narrative of narratives) {
+    await pool.query(
+      `
+        INSERT INTO narrative_threads (
+          id,
+          title,
+          summary,
+          direction,
+          tags,
+          entities,
+          cluster_ids,
+          timeline,
+          first_seen_at,
+          last_seen_at,
+          strength
+        )
+        VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11)
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          summary = EXCLUDED.summary,
+          direction = EXCLUDED.direction,
+          tags = EXCLUDED.tags,
+          entities = EXCLUDED.entities,
+          cluster_ids = EXCLUDED.cluster_ids,
+          timeline = EXCLUDED.timeline,
+          first_seen_at = LEAST(narrative_threads.first_seen_at, EXCLUDED.first_seen_at),
+          last_seen_at = GREATEST(narrative_threads.last_seen_at, EXCLUDED.last_seen_at),
+          strength = EXCLUDED.strength
+      `,
+      [
+        narrative.id,
+        narrative.title,
+        narrative.summary,
+        narrative.direction,
+        JSON.stringify(narrative.tags),
+        JSON.stringify(narrative.entities),
+        JSON.stringify(narrative.clusterIds),
+        JSON.stringify(narrative.timeline),
+        narrative.firstSeenAt,
+        narrative.lastSeenAt,
+        narrative.strength,
+      ],
+    );
+  }
+}
+
+export async function getNarratives(limit = 12) {
+  if (!pool) {
+    return [];
+  }
+
+  await initDb();
+  const result = await pool.query<StoredNarrativeRow>(
+    `
+      SELECT *
+      FROM narrative_threads
+      ORDER BY strength DESC, last_seen_at DESC
+      LIMIT $1
+    `,
+    [limit],
+  );
+
+  return result.rows.map(narrativeFromRow);
+}
+
+export async function saveTrends(trends: TrendSignal[]) {
+  if (!pool || !trends.length) {
+    return;
+  }
+
+  await initDb();
+  const computedAt = new Date().toISOString();
+
+  for (const trend of trends) {
+    await pool.query(
+      `
+        INSERT INTO trend_signals (
+          tag,
+          direction,
+          velocity,
+          current_count,
+          previous_count,
+          points,
+          computed_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)
+        ON CONFLICT (tag) DO UPDATE SET
+          direction = EXCLUDED.direction,
+          velocity = EXCLUDED.velocity,
+          current_count = EXCLUDED.current_count,
+          previous_count = EXCLUDED.previous_count,
+          points = EXCLUDED.points,
+          computed_at = EXCLUDED.computed_at
+      `,
+      [
+        trend.tag,
+        trend.direction,
+        trend.velocity,
+        trend.current,
+        trend.previous,
+        JSON.stringify(trend.points),
+        computedAt,
+      ],
+    );
+  }
+}
+
+export async function getTrends(limit = 12) {
+  if (!pool) {
+    return [];
+  }
+
+  await initDb();
+  const result = await pool.query<StoredTrendSignalRow>(
+    `
+      SELECT *
+      FROM trend_signals
+      ORDER BY ABS(velocity) DESC, current_count DESC
+      LIMIT $1
+    `,
+    [limit],
+  );
+
+  return result.rows.map(trendFromRow);
+}
+
+export async function saveConnections(connections: ConnectionStrength[]) {
+  if (!pool || !connections.length) {
+    return;
+  }
+
+  await initDb();
+  const computedAt = new Date().toISOString();
+
+  for (const connection of connections) {
+    await pool.query(
+      `
+        INSERT INTO connections (
+          id,
+          source,
+          target,
+          source_type,
+          target_type,
+          weight,
+          cluster_ids,
+          computed_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)
+        ON CONFLICT (id) DO UPDATE SET
+          source = EXCLUDED.source,
+          target = EXCLUDED.target,
+          source_type = EXCLUDED.source_type,
+          target_type = EXCLUDED.target_type,
+          weight = EXCLUDED.weight,
+          cluster_ids = EXCLUDED.cluster_ids,
+          computed_at = EXCLUDED.computed_at
+      `,
+      [
+        connection.id,
+        connection.source,
+        connection.target,
+        connection.sourceType,
+        connection.targetType,
+        connection.weight,
+        JSON.stringify(connection.clusterIds),
+        computedAt,
+      ],
+    );
+  }
+}
+
+export async function getConnections(limit = 15) {
+  if (!pool) {
+    return [];
+  }
+
+  await initDb();
+  const result = await pool.query<StoredConnectionRow>(
+    `
+      SELECT *
+      FROM connections
+      ORDER BY weight DESC
+      LIMIT $1
+    `,
+    [limit],
+  );
+
+  return result.rows.map(connectionFromRow);
 }
 
 function rowsFromAnalysis(analysis: PatternAnalysis): StoredPatternRow[] {

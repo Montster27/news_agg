@@ -21,12 +21,18 @@ import { FiltersBar } from "@/components/FiltersBar";
 import { SearchCommandPanel } from "@/components/SearchCommandPanel";
 import { TopSignals } from "@/components/TopSignals";
 import { extractEntities, mergeEntities } from "@/lib/entities";
+import { buildNarrativeThreads } from "@/lib/narratives";
+import { computeConnections } from "@/lib/connections";
 import type {
   Article,
   ArticleDomain,
+  ConnectionStrength,
   ImportanceFeedback,
+  NarrativeInsightReport,
+  NarrativeThread,
   PersonalizationRule,
   StoryCluster,
+  TrendSignal,
   UserAffinity,
   UserFeedbackAction,
 } from "@/lib/types";
@@ -80,6 +86,9 @@ type CommandCenterClientProps = {
   clusters?: StoryCluster[];
   affinities?: UserAffinity[];
   rules?: PersonalizationRule[];
+  trendSignals?: TrendSignal[];
+  narratives?: NarrativeThread[];
+  connections?: ConnectionStrength[];
   brief: WeeklyBrief;
   patterns: PatternAnalysis;
   longTermTrends: LongTermTrendAnalysis;
@@ -283,6 +292,9 @@ export function CommandCenterClient({
   clusters: initialClusters,
   affinities: initialAffinities = [],
   rules: initialRules = [],
+  trendSignals: initialTrendSignals = [],
+  narratives: initialNarratives = [],
+  connections: initialConnections = [],
   brief: initialBrief,
   patterns: initialPatterns,
   longTermTrends: initialLongTermTrends,
@@ -510,6 +522,26 @@ export function CommandCenterClient({
     return prioritized.slice(0, 6);
   }, [activeTags, longTermTrends.rising, personalizedView, profile.preferred_tags]);
 
+  const trendSignals = useMemo<TrendSignal[]>(() => {
+    const fromPatterns = patterns.trendingUp.map((trend) => ({
+      tag: trend.tag,
+      direction: trend.delta > 0 ? "up" as const : trend.delta < 0 ? "down" as const : "flat" as const,
+      velocity: trend.delta,
+      current: trend.current,
+      previous: trend.previous,
+      points: [
+        { period: "previous", count: trend.previous },
+        { period: patterns.generatedAt.slice(0, 10), count: trend.current },
+      ],
+    }));
+    const seed = initialTrendSignals.length ? initialTrendSignals : fromPatterns;
+    const filtered = activeTags.length
+      ? seed.filter((trend) => activeTags.includes(trend.tag))
+      : seed;
+
+    return filtered.slice(0, 8);
+  }, [activeTags, initialTrendSignals, patterns.generatedAt, patterns.trendingUp]);
+
   const topSignals = useMemo(() => {
     return [...filteredClusters]
       .sort((left, right) => {
@@ -541,6 +573,34 @@ export function CommandCenterClient({
       return rightScore - leftScore;
     });
   }, [filteredClusters, personalizedView]);
+  const narrativeThreads = useMemo(
+    () => {
+      const built = buildNarrativeThreads(sortedClusters);
+      return built.length ? built : initialNarratives;
+    },
+    [initialNarratives, sortedClusters],
+  );
+  const connections = useMemo(
+    () => {
+      const built = computeConnections(sortedClusters);
+      return built.length ? built : initialConnections;
+    },
+    [initialConnections, sortedClusters],
+  );
+  const narrativeInsights = useMemo<NarrativeInsightReport>(() => ({
+    whatChanged: trendSignals
+      .filter((trend) => trend.direction !== "flat")
+      .map((trend) => `${trend.tag.replace(/_/g, " ")} moved ${trend.direction}.`)
+      .slice(0, 4),
+    emergingTrends: trendSignals
+      .filter((trend) => trend.direction === "up")
+      .map((trend) => `${trend.tag.replace(/_/g, " ")} is gaining speed.`)
+      .slice(0, 4),
+    keyNarratives: narrativeThreads.map((thread) => thread.summary).slice(0, 4),
+    crossDomainInsights: connections
+      .map((connection) => `${connection.source} is connected to ${connection.target}.`)
+      .slice(0, 4),
+  }), [connections, narrativeThreads, trendSignals]);
   const visibleClusters = useMemo(
     () => sortedClusters.slice(0, VISIBLE_CLUSTER_LIMIT),
     [sortedClusters],
@@ -623,6 +683,9 @@ export function CommandCenterClient({
         confidence: cluster.confidence,
         articleCount: cluster.articleIds.length,
       })),
+      trendSignals,
+      narratives: narrativeThreads,
+      connections,
       affinities,
       rules,
       feedback: feedbackMap,
@@ -633,13 +696,16 @@ export function CommandCenterClient({
       activeTags,
       affinities,
       feedbackMap,
+      connections,
       learningProfile,
+      narrativeThreads,
       personalizedView,
       rules,
       scoreLookup,
       sortedArticles,
       sortedClusters,
       timeRange,
+      trendSignals,
     ],
   );
 
@@ -788,12 +854,16 @@ export function CommandCenterClient({
       />
       <KeyInsights
         insights={visibleInsights}
+        narrativeInsights={insightReport.narrativeInsights ?? narrativeInsights}
         activeTags={activeTags}
         onInsightClick={handleShiftClick}
       />
       <TrendsPanel
         emerging={filteredPatterns}
         longTerm={filteredLongTerm}
+        trendSignals={trendSignals}
+        narratives={narrativeThreads}
+        connections={connections}
         activeTags={activeTags}
         personalizedView={personalizedView}
         onTrendClick={setSingleTag}

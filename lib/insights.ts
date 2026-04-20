@@ -3,7 +3,14 @@ import "server-only";
 import { AI_INSIGHT_MODEL, getOpenAIClient } from "@/lib/ai-client";
 import { saveInsightsToDb } from "@/lib/db";
 import type { PatternAnalysis, TagCorrelation } from "@/lib/patterns";
-import type { Article, ArticleDomain } from "@/lib/types";
+import type {
+  Article,
+  ArticleDomain,
+  ConnectionStrength,
+  NarrativeInsightReport,
+  NarrativeThread,
+  TrendSignal,
+} from "@/lib/types";
 
 const ONE_HOUR = 60 * 60 * 1000;
 
@@ -31,6 +38,7 @@ export type InsightEngineResult = {
   insights: InsightItem[];
   inflections: DetectedInflection[];
   crossDomainShifts: CrossDomainShift[];
+  narrativeInsights?: NarrativeInsightReport;
   generatedAt: string;
   usedFallback: boolean;
 };
@@ -229,12 +237,57 @@ function sanitizeInsights(items: unknown, fallback: InsightItem[]) {
   return cleaned.length ? cleaned.slice(0, 5) : fallback;
 }
 
+function readable(value: string) {
+  return value.replace(/_/g, " ");
+}
+
+export function generateNarrativeInsights({
+  trends,
+  narratives,
+  connections,
+}: {
+  trends: TrendSignal[];
+  narratives: NarrativeThread[];
+  connections: ConnectionStrength[];
+}): NarrativeInsightReport {
+  const rising = trends.filter((trend) => trend.direction === "up").slice(0, 4);
+  const falling = trends.filter((trend) => trend.direction === "down").slice(0, 3);
+  const topNarratives = narratives.slice(0, 4);
+  const topConnections = connections.slice(0, 4);
+
+  return {
+    whatChanged: [
+      ...rising.map(
+        (trend) =>
+          `${readable(trend.tag)} is moving up with velocity ${trend.velocity}.`,
+      ),
+      ...falling.map(
+        (trend) =>
+          `${readable(trend.tag)} is cooling from ${trend.previous} to ${trend.current}.`,
+      ),
+    ].slice(0, 5),
+    emergingTrends: rising
+      .map((trend) => `${readable(trend.tag)} is emerging across recent coverage.`)
+      .slice(0, 4),
+    keyNarratives: topNarratives
+      .map((thread) => `${thread.summary} Timeline length: ${thread.timeline.length}.`)
+      .slice(0, 4),
+    crossDomainInsights: topConnections
+      .map(
+        (connection) =>
+          `${connection.source} is increasingly connected to ${connection.target} across ${connection.clusterIds.length} story clusters.`,
+      )
+      .slice(0, 4),
+  };
+}
+
 export async function generateInsightReport(params: {
   articles: Article[];
   patterns: PatternAnalysis;
   longTermTrends: Array<{ tag: string; delta: number }>;
+  narrativeInsights?: NarrativeInsightReport;
 }) {
-  const { articles, patterns, longTermTrends } = params;
+  const { articles, patterns, longTermTrends, narrativeInsights } = params;
   const inflections = detectInflections(patterns);
   const crossDomainShifts = detectCrossDomainShifts(articles);
   const key = buildCacheKey(articles, patterns, longTermTrends);
@@ -261,6 +314,7 @@ export async function generateInsightReport(params: {
       insights: fallback,
       inflections,
       crossDomainShifts,
+      narrativeInsights,
       generatedAt: new Date().toISOString(),
       usedFallback: true,
     };
@@ -308,6 +362,7 @@ Return JSON only.`;
       insights: sanitizeInsights(parsed.insights, fallback),
       inflections,
       crossDomainShifts,
+      narrativeInsights,
       generatedAt: new Date().toISOString(),
       usedFallback: false,
     };
@@ -322,6 +377,7 @@ Return JSON only.`;
       insights: fallback,
       inflections,
       crossDomainShifts,
+      narrativeInsights,
       generatedAt: new Date().toISOString(),
       usedFallback: true,
     };

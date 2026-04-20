@@ -1,11 +1,20 @@
 import { CommandCenterClient } from "@/components/CommandCenterClient";
 import { generateWeeklyBrief } from "@/lib/brief";
-import { analyzeLongTermTrends, getAffinities, getRules } from "@/lib/db";
+import {
+  analyzeLongTermTrends,
+  getAffinities,
+  getRules,
+  saveConnections,
+  saveNarratives,
+  saveTrends,
+} from "@/lib/db";
 import { ingestFeeds } from "@/lib/ingest";
-import { generateInsightReport } from "@/lib/insights";
-import { analyzePatterns, analyzePatternsWithPersistence } from "@/lib/patterns";
+import { generateInsightReport, generateNarrativeInsights } from "@/lib/insights";
+import { analyzePatterns, analyzePatternsWithPersistence, computeTrendSignals } from "@/lib/patterns";
 import { fallbackArticles } from "@/lib/data";
 import { defaultUserProfile, personalizeStoryCluster } from "@/lib/user";
+import { buildNarrativeThreads } from "@/lib/narratives";
+import { computeConnections } from "@/lib/connections";
 import type { WeeklyBrief } from "@/lib/brief";
 import type { InsightEngineResult } from "@/lib/insights";
 import type { LongTermTrendAnalysis } from "@/lib/db";
@@ -49,6 +58,12 @@ function desktopBootstrapData() {
     insights: [],
     inflections: [],
     crossDomainShifts: [],
+    narrativeInsights: {
+      whatChanged: [],
+      emergingTrends: [],
+      keyNarratives: [],
+      crossDomainInsights: [],
+    },
     generatedAt: now,
     usedFallback: true,
   };
@@ -58,6 +73,9 @@ function desktopBootstrapData() {
     storyClusters: [],
     affinities: [],
     rules: [],
+    trendSignals: [],
+    narratives: [],
+    connections: [],
     brief,
     patterns,
     longTermTrends,
@@ -83,12 +101,26 @@ export default async function DashboardPage() {
         (right.adaptiveScore ?? right.impactScore) - (left.adaptiveScore ?? left.impactScore),
     );
   const patterns = await analyzePatternsWithPersistence(articles, "All");
+  const trendSignals = computeTrendSignals(patterns);
+  const narratives = buildNarrativeThreads(personalizedStoryClusters);
+  const connections = computeConnections(personalizedStoryClusters);
+  await Promise.all([
+    saveTrends(trendSignals),
+    saveNarratives(narratives),
+    saveConnections(connections),
+  ]);
+  const narrativeInsights = generateNarrativeInsights({
+    trends: trendSignals,
+    narratives,
+    connections,
+  });
   const brief = await generateWeeklyBrief(articles, patterns);
   const longTermTrends = await analyzeLongTermTrends("All");
   const insightReport = await generateInsightReport({
     articles,
     patterns,
     longTermTrends: longTermTrends.rising,
+    narrativeInsights,
   });
 
   return (
@@ -97,6 +129,9 @@ export default async function DashboardPage() {
       storyClusters={personalizedStoryClusters}
       affinities={affinities}
       rules={rules}
+      trendSignals={trendSignals}
+      narratives={narratives}
+      connections={connections}
       brief={brief}
       patterns={patterns}
       longTermTrends={longTermTrends}

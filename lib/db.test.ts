@@ -152,4 +152,139 @@ describe("story cluster database helpers", () => {
     expect(affinities[0]?.key).toBe("openai");
     expect(rules[0]?.value).toBe("ai_infrastructure");
   });
+
+  it("persists narrative intelligence outputs", async () => {
+    process.env.POSTGRES_URL = "postgres://local/test";
+    queryMock.mockImplementation((statement: string) => {
+      const sql = String(statement);
+
+      if (sql.includes("FROM narrative_threads")) {
+        return Promise.resolve({
+          rows: [
+            {
+              id: "narrative-openai",
+              title: "OpenAI expands AI infrastructure",
+              summary: "growing thread around ai infrastructure.",
+              direction: "growing",
+              tags: ["ai_infrastructure"],
+              entities: [{ name: "OpenAI", normalized: "openai", type: "company" }],
+              cluster_ids: ["cluster-openai-infra"],
+              timeline: [
+                {
+                  clusterId: "cluster-openai-infra",
+                  headline: "OpenAI expands AI infrastructure",
+                  impactScore: 8,
+                  seenAt: "2026-04-20T12:00:00.000Z",
+                },
+              ],
+              first_seen_at: "2026-04-20T10:00:00.000Z",
+              last_seen_at: "2026-04-20T12:00:00.000Z",
+              strength: 5,
+            },
+          ],
+        });
+      }
+
+      if (sql.includes("FROM trend_signals")) {
+        return Promise.resolve({
+          rows: [
+            {
+              tag: "ai_infrastructure",
+              direction: "up",
+              velocity: 3,
+              current_count: 4,
+              previous_count: 1,
+              points: [{ period: "2026-16", count: 4 }],
+              computed_at: "2026-04-20T12:00:00.000Z",
+            },
+          ],
+        });
+      }
+
+      if (sql.includes("FROM connections")) {
+        return Promise.resolve({
+          rows: [
+            {
+              id: "tag:ai::entity:openai",
+              source: "ai_infrastructure",
+              target: "OpenAI",
+              source_type: "tag",
+              target_type: "entity",
+              weight: 2.5,
+              cluster_ids: ["cluster-openai-infra"],
+              computed_at: "2026-04-20T12:00:00.000Z",
+            },
+          ],
+        });
+      }
+
+      return Promise.resolve({ rows: [] });
+    });
+
+    const {
+      getConnections,
+      getNarratives,
+      getTrends,
+      saveConnections,
+      saveNarratives,
+      saveTrends,
+    } = await import("./db");
+    await saveNarratives([
+      {
+        id: "narrative-openai",
+        title: "OpenAI expands AI infrastructure",
+        summary: "growing thread around ai infrastructure.",
+        direction: "growing",
+        tags: ["ai_infrastructure"],
+        entities: [{ name: "OpenAI", normalized: "openai", type: "company" }],
+        clusterIds: ["cluster-openai-infra"],
+        timeline: [
+          {
+            clusterId: "cluster-openai-infra",
+            headline: "OpenAI expands AI infrastructure",
+            impactScore: 8,
+            seenAt: "2026-04-20T12:00:00.000Z",
+          },
+        ],
+        firstSeenAt: "2026-04-20T10:00:00.000Z",
+        lastSeenAt: "2026-04-20T12:00:00.000Z",
+        strength: 5,
+      },
+    ]);
+    await saveTrends([
+      {
+        tag: "ai_infrastructure",
+        direction: "up",
+        velocity: 3,
+        current: 4,
+        previous: 1,
+        points: [{ period: "2026-16", count: 4 }],
+      },
+    ]);
+    await saveConnections([
+      {
+        id: "tag:ai::entity:openai",
+        source: "ai_infrastructure",
+        target: "OpenAI",
+        sourceType: "tag",
+        targetType: "entity",
+        weight: 2.5,
+        clusterIds: ["cluster-openai-infra"],
+      },
+    ]);
+
+    const [narratives, trends, connections] = await Promise.all([
+      getNarratives(),
+      getTrends(),
+      getConnections(),
+    ]);
+    const sql = queryMock.mock.calls.map(([statement]) => String(statement)).join("\n");
+
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS narrative_threads");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS trend_signals");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS connections");
+    expect(narratives[0]?.direction).toBe("growing");
+    expect(trends[0]?.direction).toBe("up");
+    expect(connections[0]?.weight).toBe(2.5);
+  });
 });
