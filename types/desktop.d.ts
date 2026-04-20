@@ -126,6 +126,20 @@ declare global {
         getInsights: (week?: string) => Promise<import("@/lib/insights").InsightEngineResult>;
         getLongTermTrends: (filters?: { weeks?: number }) => Promise<import("@/lib/db").LongTermTrendAnalysis>;
         getImportanceFeedback: () => Promise<Record<string, import("@/lib/types").ImportanceFeedback>>;
+        getUserFeedback: (limit?: number) => Promise<import("@/lib/types").UserFeedback[]>;
+        getAffinities: () => Promise<import("@/lib/types").UserAffinity[]>;
+        getRules: () => Promise<import("@/lib/types").PersonalizationRule[]>;
+        saveUserFeedback: (payload: {
+          clusterId: string;
+          action: import("@/lib/types").UserFeedbackAction;
+          value?: number;
+          cluster?: import("@/lib/types").StoryCluster;
+        }) => Promise<{
+          success: boolean;
+          feedback?: import("@/lib/types").UserFeedback;
+          affinities?: import("@/lib/types").UserAffinity[];
+          error?: string;
+        }>;
         saveImportanceFeedback: (payload: {
           articleId: string;
           originalImportance?: 1 | 2 | 3 | 4 | 5;

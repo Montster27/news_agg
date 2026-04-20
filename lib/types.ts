@@ -43,8 +43,47 @@ export type StoryCluster = {
   sourceCount: number;
   confidence: "low" | "medium" | "high";
   impactScore: number;
+  adaptiveScore?: number;
+  personalizationReasons?: string[];
+  preferenceAdjusted?: boolean;
   firstSeenAt: string;
   lastSeenAt: string;
+};
+
+export type UserFeedbackAction =
+  | "click"
+  | "expand"
+  | "boost"
+  | "suppress"
+  | "rescore";
+
+export type UserFeedback = {
+  id?: number;
+  clusterId: string;
+  action: UserFeedbackAction | string;
+  value?: number | null;
+  createdAt: string;
+};
+
+export type UserAffinityType = "tag" | "entity";
+
+export type UserAffinity = {
+  key: string;
+  type: UserAffinityType;
+  score: number;
+  updatedAt: string;
+};
+
+export type PersonalizationRuleType = "boost" | "suppress" | "filter";
+
+export type PersonalizationRuleField = "tag" | "domain" | "entity";
+
+export type PersonalizationRule = {
+  id?: number;
+  type: PersonalizationRuleType;
+  field: PersonalizationRuleField;
+  value: string;
+  weight: number;
 };
 
 export type ImportanceFeedback = {

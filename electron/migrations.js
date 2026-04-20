@@ -136,6 +136,43 @@ const migrations = [
       `).run();
     },
   },
+  {
+    version: 3,
+    name: "phase_3_personal_intelligence",
+    up(db) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS user_feedback (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          cluster_id TEXT NOT NULL,
+          action TEXT NOT NULL,
+          value REAL,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS user_affinity (
+          key TEXT PRIMARY KEY,
+          type TEXT NOT NULL,
+          score REAL NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS rules (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT NOT NULL,
+          field TEXT NOT NULL,
+          value TEXT NOT NULL,
+          weight REAL NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_user_feedback_cluster_id
+          ON user_feedback(cluster_id);
+        CREATE INDEX IF NOT EXISTS idx_user_feedback_created_at
+          ON user_feedback(created_at);
+        CREATE INDEX IF NOT EXISTS idx_user_affinity_type_score
+          ON user_affinity(type, score);
+      `);
+    },
+  },
 ];
 
 function ensureSchemaVersionTable(db) {

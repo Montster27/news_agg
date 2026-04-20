@@ -8,14 +8,18 @@ const {
 } = require("./repositories/articlesRepo");
 const {
   clearLearningProfile,
+  getAffinities,
   getImportanceFeedback,
   getLastRefresh,
   getLastRefreshError,
   getLastRefreshStats,
   getLearningProfile,
   getPreferences,
+  getRules,
+  getUserFeedback,
   saveImportanceFeedback,
   savePreferences,
+  saveUserFeedback,
 } = require("./repositories/preferencesRepo");
 const {
   getBrief,
@@ -335,6 +339,29 @@ ipcMain.handle("desktop:data:getLongTermTrends", (_event, filters = {}) => {
 
 ipcMain.handle("desktop:data:getImportanceFeedback", () => {
   return getImportanceFeedback(desktopDb);
+});
+
+ipcMain.handle("desktop:data:getUserFeedback", (_event, limit) => {
+  return getUserFeedback(desktopDb, limit);
+});
+
+ipcMain.handle("desktop:data:getAffinities", () => {
+  return getAffinities(desktopDb);
+});
+
+ipcMain.handle("desktop:data:getRules", () => {
+  return getRules(desktopDb);
+});
+
+ipcMain.handle("desktop:data:saveUserFeedback", (_event, payload) => {
+  try {
+    return saveUserFeedback(desktopDb, payload);
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Invalid user feedback",
+    };
+  }
 });
 
 ipcMain.handle("desktop:data:saveImportanceFeedback", (_event, payload) => {

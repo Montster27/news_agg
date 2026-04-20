@@ -12,6 +12,11 @@ type ArticleCardProps = {
   activeTags?: string[];
   feedback?: ImportanceFeedback;
   onTagClick?: (tag: string) => void;
+  onClusterFeedback?: (
+    cluster: StoryCluster,
+    action: "boost" | "suppress" | "expand" | "rescore",
+    value?: number,
+  ) => void;
   onImportanceChange?: (
     article: Article,
     userImportance: 1 | 2 | 3 | 4 | 5,
@@ -26,6 +31,7 @@ export function ArticleCard({
   activeTags = [],
   feedback,
   onTagClick,
+  onClusterFeedback,
   onImportanceChange,
   onImportanceReset,
 }: ArticleCardProps) {
@@ -36,6 +42,8 @@ export function ArticleCard({
     const visibleEntities = cluster.entities
       .filter((entity) => entity.type !== "other")
       .slice(0, 4);
+    const displayScore = cluster.adaptiveScore ?? cluster.impactScore;
+    const reasons = cluster.personalizationReasons?.slice(0, 3) ?? [];
 
     return (
       <article
@@ -54,7 +62,12 @@ export function ArticleCard({
           </div>
           <div className="rounded-xl border border-line bg-mist px-3 py-2 text-right">
             <div className="text-[10px] font-semibold uppercase text-slate-500">Impact</div>
-            <div className="text-xl font-semibold text-ink">{cluster.impactScore.toFixed(1)}</div>
+            <div className="text-xl font-semibold text-ink">{displayScore.toFixed(1)}</div>
+            {cluster.preferenceAdjusted ? (
+              <div className="mt-1 text-[11px] font-medium normal-case tracking-normal text-emerald-700">
+                Adjusted by your preferences
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -81,9 +94,63 @@ export function ArticleCard({
           </div>
         ) : null}
 
+        {reasons.length ? (
+          <div className="mt-3 text-xs leading-5 text-emerald-700">
+            Boosted because: {reasons.join(", ")}
+          </div>
+        ) : null}
+
+        {onClusterFeedback ? (
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              aria-label="Boost this story"
+              title="Boost this story"
+              onClick={() => onClusterFeedback(cluster, "boost")}
+              className="rounded-full border border-line bg-white px-2.5 py-1 text-sm hover:border-emerald-300 hover:text-emerald-700"
+            >
+              👍
+            </button>
+            <button
+              type="button"
+              aria-label="Suppress this story"
+              title="Suppress this story"
+              onClick={() => onClusterFeedback(cluster, "suppress")}
+              className="rounded-full border border-line bg-white px-2.5 py-1 text-sm hover:border-rose-300 hover:text-rose-700"
+            >
+              👎
+            </button>
+            <label className="min-w-44 text-xs font-medium text-slate-500">
+              Importance override
+              <input
+                type="range"
+                min="1"
+                max="10"
+                step="1"
+                defaultValue={Math.round(displayScore)}
+                aria-label="Override story importance"
+                onMouseUp={(event) =>
+                  onClusterFeedback(cluster, "rescore", Number(event.currentTarget.value))
+                }
+                onKeyUp={(event) =>
+                  onClusterFeedback(cluster, "rescore", Number(event.currentTarget.value))
+                }
+                className="mt-1 block w-full accent-sky-700"
+              />
+            </label>
+          </div>
+        ) : null}
+
         <button
           type="button"
-          onClick={() => setExpanded((current) => !current)}
+          onClick={() =>
+            setExpanded((current) => {
+              if (!current) {
+                onClusterFeedback?.(cluster, "expand");
+              }
+              return !current;
+            })
+          }
           className="mt-4 text-sm font-medium text-accent"
         >
           {expanded ? "Hide synthesis" : "Show why it matters"}

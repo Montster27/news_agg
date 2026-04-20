@@ -3,7 +3,16 @@ import {
   getLearnedAdjustment,
   type ImportanceLearningProfile,
 } from "@/lib/feedback";
-import { Article, ArticleDomain, ImportanceFeedback, StoryCluster } from "@/lib/types";
+import { topAffinityReasons } from "@/lib/affinity";
+import { evaluateRules } from "@/lib/rules";
+import {
+  Article,
+  ArticleDomain,
+  ImportanceFeedback,
+  PersonalizationRule,
+  StoryCluster,
+  UserAffinity,
+} from "@/lib/types";
 
 export type UserProfile = {
   preferred_domains: ArticleDomain[];
@@ -102,4 +111,96 @@ export function scoreStoryCluster(cluster: StoryCluster, profile: UserProfile) {
     domainMatch * profile.importance_weights.domain_match -
     excludedPenalty
   );
+}
+
+function clampScore(value: number) {
+  return Number(Math.max(1, Math.min(10, value)).toFixed(1));
+}
+
+function recencyWeight(cluster: StoryCluster) {
+  const lastSeen = new Date(cluster.lastSeenAt).getTime();
+  if (Number.isNaN(lastSeen)) {
+    return 0;
+  }
+
+  const ageHours = (Date.now() - lastSeen) / (60 * 60 * 1000);
+  if (ageHours <= 12) return 0.8;
+  if (ageHours <= 48) return 0.5;
+  if (ageHours <= 168) return 0.2;
+  return 0;
+}
+
+function affinityScore(cluster: StoryCluster, affinities: UserAffinity[], type: "tag" | "entity") {
+  const byKey = new Map(
+    affinities
+      .filter((affinity) => affinity.type === type)
+      .map((affinity) => [affinity.key, affinity.score]),
+  );
+  const keys =
+    type === "tag"
+      ? cluster.tags
+      : cluster.entities.map((entity) => entity.normalized || entity.name);
+  const matches = keys
+    .map((key) => key.trim().toLowerCase().replace(/\s+/g, "_"))
+    .map((key) => byKey.get(key) ?? 0)
+    .filter((score) => score !== 0);
+
+  if (!matches.length) {
+    return 0;
+  }
+
+  return matches.reduce((sum, score) => sum + score, 0) / Math.sqrt(matches.length);
+}
+
+export function scoreStoryClusterAdaptive(
+  cluster: StoryCluster,
+  userProfile: UserProfile,
+  affinities: UserAffinity[] = [],
+  rules: PersonalizationRule[] = [],
+) {
+  const baseScore = scoreStoryCluster(cluster, userProfile);
+  const tagAffinityScore = affinityScore(cluster, affinities, "tag") * 0.45;
+  const entityAffinityScore = affinityScore(cluster, affinities, "entity") * 0.35;
+  const rulesAdjustment = evaluateRules(cluster, rules).adjustment;
+
+  return clampScore(
+    baseScore + tagAffinityScore + entityAffinityScore + rulesAdjustment + recencyWeight(cluster),
+  );
+}
+
+export function getStoryClusterPersonalizationReasons(
+  cluster: StoryCluster,
+  affinities: UserAffinity[] = [],
+  rules: PersonalizationRule[] = [],
+) {
+  const reasons = topAffinityReasons(cluster, affinities);
+  const ruleReasons = evaluateRules(cluster, rules).reasons.filter(
+    (reason) => !reason.startsWith("Filtered"),
+  );
+
+  return [...reasons, ...ruleReasons].slice(0, 4);
+}
+
+export function personalizeStoryCluster(
+  cluster: StoryCluster,
+  userProfile: UserProfile,
+  affinities: UserAffinity[] = [],
+  rules: PersonalizationRule[] = [],
+) {
+  const ruleApplication = evaluateRules(cluster, rules);
+
+  if (ruleApplication.filtered) {
+    return null;
+  }
+
+  const adaptiveScore = scoreStoryClusterAdaptive(cluster, userProfile, affinities, rules);
+  const reasons = getStoryClusterPersonalizationReasons(cluster, affinities, rules);
+
+  return {
+    ...cluster,
+    adaptiveScore,
+    preferenceAdjusted:
+      adaptiveScore !== Number(cluster.impactScore.toFixed(1)) || reasons.length > 0,
+    personalizationReasons: reasons,
+  };
 }

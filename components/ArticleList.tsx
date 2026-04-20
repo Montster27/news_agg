@@ -22,6 +22,11 @@ type ArticleListProps = {
   feedbackMap?: Record<string, ImportanceFeedback>;
   learningProfile?: ImportanceLearningProfile;
   onTagClick: (tag: string) => void;
+  onClusterFeedback?: (
+    cluster: StoryCluster,
+    action: "boost" | "suppress" | "expand" | "rescore",
+    value?: number,
+  ) => void;
   onImportanceChange: (
     article: Article,
     userImportance: 1 | 2 | 3 | 4 | 5,
@@ -41,6 +46,7 @@ export function ArticleList({
   feedbackMap = {},
   learningProfile,
   onTagClick,
+  onClusterFeedback,
   onImportanceChange,
   onImportanceReset,
 }: ArticleListProps) {
@@ -74,6 +80,11 @@ export function ArticleList({
             const visibleEntities = cluster.entities
               .filter((entity) => entity.type !== "other")
               .slice(0, 5);
+            const displayScore =
+              personalizedView && cluster.adaptiveScore
+                ? cluster.adaptiveScore
+                : cluster.impactScore;
+            const reasons = cluster.personalizationReasons?.slice(0, 3) ?? [];
 
             return (
               <article
@@ -117,10 +128,20 @@ export function ArticleList({
                       Impact
                     </div>
                     <div className="mt-1 text-2xl font-semibold text-slate-950">
-                      {cluster.impactScore.toFixed(1)}
+                      {displayScore.toFixed(1)}
                     </div>
+                    {personalizedView && cluster.preferenceAdjusted ? (
+                      <div className="mt-1 text-xs font-medium text-emerald-700">
+                        Adjusted by your preferences
+                      </div>
+                    ) : null}
                   </div>
                 </div>
+                {personalizedView && reasons.length ? (
+                  <div className="mt-3 text-xs leading-5 text-emerald-700">
+                    Boosted because: {reasons.join(", ")}
+                  </div>
+                ) : null}
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   {visibleTags.map((tag) => (
                     <Tag
@@ -143,7 +164,62 @@ export function ArticleList({
                     ))}
                   </div>
                 ) : null}
-                <details className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                {onClusterFeedback ? (
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      aria-label="Boost this story"
+                      title="Boost this story"
+                      onClick={() => onClusterFeedback(cluster, "boost")}
+                      className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-sm hover:border-emerald-300 hover:text-emerald-700"
+                    >
+                      👍
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="Suppress this story"
+                      title="Suppress this story"
+                      onClick={() => onClusterFeedback(cluster, "suppress")}
+                      className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-sm hover:border-rose-300 hover:text-rose-700"
+                    >
+                      👎
+                    </button>
+                    <label className="min-w-44 text-xs font-medium text-slate-500">
+                      Importance override
+                      <input
+                        type="range"
+                        min="1"
+                        max="10"
+                        step="1"
+                        defaultValue={Math.round(displayScore)}
+                        aria-label="Override story importance"
+                        onMouseUp={(event) =>
+                          onClusterFeedback(
+                            cluster,
+                            "rescore",
+                            Number(event.currentTarget.value),
+                          )
+                        }
+                        onKeyUp={(event) =>
+                          onClusterFeedback(
+                            cluster,
+                            "rescore",
+                            Number(event.currentTarget.value),
+                          )
+                        }
+                        className="mt-1 block w-full accent-sky-700"
+                      />
+                    </label>
+                  </div>
+                ) : null}
+                <details
+                  className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600"
+                  onToggle={(event) => {
+                    if (event.currentTarget.open) {
+                      onClusterFeedback?.(cluster, "expand");
+                    }
+                  }}
+                >
                   <summary className="cursor-pointer font-medium text-slate-800">
                     Raw articles
                   </summary>

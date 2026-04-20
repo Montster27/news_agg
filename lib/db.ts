@@ -3,7 +3,16 @@ import "server-only";
 import { Pool } from "pg";
 import type { WeeklyBrief } from "@/lib/brief";
 import type { PatternAnalysis } from "@/lib/patterns";
-import type { Article, ArticleDomain, ExtractedEntity, StoryCluster } from "@/lib/types";
+import type {
+  Article,
+  ArticleDomain,
+  ExtractedEntity,
+  PersonalizationRule,
+  StoryCluster,
+  UserAffinity,
+  UserAffinityType,
+  UserFeedback,
+} from "@/lib/types";
 
 const databaseUrl =
   process.env.POSTGRES_URL && process.env.POSTGRES_URL !== "your_vercel_db_url"
@@ -50,6 +59,29 @@ type StoredArticleRow = {
   url: string | null;
   published_at: string;
   processed_at: string;
+};
+
+type StoredUserFeedbackRow = {
+  id: number;
+  cluster_id: string;
+  action: string;
+  value: number | null;
+  created_at: string;
+};
+
+type StoredUserAffinityRow = {
+  key: string;
+  type: UserAffinityType;
+  score: number;
+  updated_at: string;
+};
+
+type StoredRuleRow = {
+  id: number;
+  type: PersonalizationRule["type"];
+  field: PersonalizationRule["field"];
+  value: string;
+  weight: number;
 };
 
 export type StoredInsight = {
@@ -174,6 +206,35 @@ export async function initDb() {
     `);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_feedback (
+        id SERIAL PRIMARY KEY,
+        cluster_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        value REAL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS user_affinity (
+        key TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        score REAL NOT NULL,
+        updated_at TIMESTAMPTZ
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS rules (
+        id SERIAL PRIMARY KEY,
+        type TEXT NOT NULL,
+        field TEXT NOT NULL,
+        value TEXT NOT NULL,
+        weight REAL NOT NULL
+      );
+    `);
+
+    await pool.query(`
       CREATE INDEX IF NOT EXISTS articles_published_at_idx
       ON articles (published_at DESC);
     `);
@@ -201,6 +262,21 @@ export async function initDb() {
     await pool.query(`
       CREATE INDEX IF NOT EXISTS story_clusters_domain_idx
       ON story_clusters (domain);
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS user_feedback_cluster_id_idx
+      ON user_feedback (cluster_id);
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS user_feedback_created_at_idx
+      ON user_feedback (created_at DESC);
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS user_affinity_type_score_idx
+      ON user_affinity (type, score DESC);
     `);
 
     initialized = true;
@@ -410,6 +486,144 @@ export async function getClusterArticles(clusterId: string) {
     tags: row.tags ?? [],
     importance: row.importance,
   }));
+}
+
+function userFeedbackFromRow(row: StoredUserFeedbackRow): UserFeedback {
+  return {
+    id: row.id,
+    clusterId: row.cluster_id,
+    action: row.action,
+    value: row.value,
+    createdAt: new Date(row.created_at).toISOString(),
+  };
+}
+
+function userAffinityFromRow(row: StoredUserAffinityRow): UserAffinity {
+  return {
+    key: row.key,
+    type: row.type,
+    score: Number(row.score),
+    updatedAt: row.updated_at
+      ? new Date(row.updated_at).toISOString()
+      : new Date().toISOString(),
+  };
+}
+
+function ruleFromRow(row: StoredRuleRow): PersonalizationRule {
+  return {
+    id: row.id,
+    type: row.type,
+    field: row.field,
+    value: row.value,
+    weight: Number(row.weight),
+  };
+}
+
+export async function saveUserFeedback(input: {
+  clusterId: string;
+  action: string;
+  value?: number | null;
+}) {
+  if (!pool) {
+    return null;
+  }
+
+  await initDb();
+  const result = await pool.query<StoredUserFeedbackRow>(
+    `
+      INSERT INTO user_feedback (cluster_id, action, value)
+      VALUES ($1, $2, $3)
+      RETURNING id, cluster_id, action, value, created_at
+    `,
+    [input.clusterId, input.action, input.value ?? null],
+  );
+
+  return result.rows[0] ? userFeedbackFromRow(result.rows[0]) : null;
+}
+
+export async function getUserFeedback(limit = 250) {
+  if (!pool) {
+    return [];
+  }
+
+  await initDb();
+  const result = await pool.query<StoredUserFeedbackRow>(
+    `
+      SELECT id, cluster_id, action, value, created_at
+      FROM user_feedback
+      ORDER BY created_at DESC
+      LIMIT $1
+    `,
+    [limit],
+  );
+
+  return result.rows.map(userFeedbackFromRow);
+}
+
+export async function updateAffinity(input: {
+  key: string;
+  type: UserAffinityType;
+  delta?: number;
+  score?: number;
+}) {
+  if (!pool) {
+    return null;
+  }
+
+  await initDb();
+  const score = Number(input.score ?? input.delta ?? 0);
+  const useAbsoluteScore = input.score !== undefined;
+  const result = await pool.query<StoredUserAffinityRow>(
+    `
+      INSERT INTO user_affinity (key, type, score, updated_at)
+      VALUES ($1, $2, $3, NOW())
+      ON CONFLICT (key) DO UPDATE SET
+        type = EXCLUDED.type,
+        score = CASE
+          WHEN $4::boolean THEN EXCLUDED.score
+          ELSE user_affinity.score + EXCLUDED.score
+        END,
+        updated_at = NOW()
+      RETURNING key, type, score, updated_at
+    `,
+    [input.key, input.type, score, useAbsoluteScore],
+  );
+
+  return result.rows[0] ? userAffinityFromRow(result.rows[0]) : null;
+}
+
+export async function getAffinities() {
+  if (!pool) {
+    return [];
+  }
+
+  await initDb();
+  const result = await pool.query<StoredUserAffinityRow>(
+    `
+      SELECT key, type, score, updated_at
+      FROM user_affinity
+      ORDER BY ABS(score) DESC, updated_at DESC
+    `,
+  );
+
+  return result.rows.map(userAffinityFromRow);
+}
+
+export async function getRules() {
+  if (!pool) {
+    return [];
+  }
+
+  await initDb();
+  const result = await pool.query<StoredRuleRow>(
+    `
+      SELECT id, type, field, value, weight
+      FROM rules
+      ORDER BY id ASC
+    `,
+  );
+
+  return result.rows.map(ruleFromRow);
 }
 
 function rowsFromAnalysis(analysis: PatternAnalysis): StoredPatternRow[] {

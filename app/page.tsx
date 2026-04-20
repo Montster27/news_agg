@@ -1,10 +1,11 @@
 import { CommandCenterClient } from "@/components/CommandCenterClient";
 import { generateWeeklyBrief } from "@/lib/brief";
-import { analyzeLongTermTrends } from "@/lib/db";
+import { analyzeLongTermTrends, getAffinities, getRules } from "@/lib/db";
 import { ingestFeeds } from "@/lib/ingest";
 import { generateInsightReport } from "@/lib/insights";
 import { analyzePatterns, analyzePatternsWithPersistence } from "@/lib/patterns";
 import { fallbackArticles } from "@/lib/data";
+import { defaultUserProfile, personalizeStoryCluster } from "@/lib/user";
 import type { WeeklyBrief } from "@/lib/brief";
 import type { InsightEngineResult } from "@/lib/insights";
 import type { LongTermTrendAnalysis } from "@/lib/db";
@@ -55,6 +56,8 @@ function desktopBootstrapData() {
   return {
     articles,
     storyClusters: [],
+    affinities: [],
+    rules: [],
     brief,
     patterns,
     longTermTrends,
@@ -69,6 +72,16 @@ export default async function DashboardPage() {
   }
 
   const { articles, storyClusters, fetchedAt } = await ingestFeeds();
+  const [affinities, rules] = await Promise.all([getAffinities(), getRules()]);
+  const personalizedStoryClusters = storyClusters
+    .flatMap((cluster) => {
+      const personalized = personalizeStoryCluster(cluster, defaultUserProfile, affinities, rules);
+      return personalized ? [personalized] : [];
+    })
+    .sort(
+      (left, right) =>
+        (right.adaptiveScore ?? right.impactScore) - (left.adaptiveScore ?? left.impactScore),
+    );
   const patterns = await analyzePatternsWithPersistence(articles, "All");
   const brief = await generateWeeklyBrief(articles, patterns);
   const longTermTrends = await analyzeLongTermTrends("All");
@@ -81,7 +94,9 @@ export default async function DashboardPage() {
   return (
     <CommandCenterClient
       articles={articles}
-      storyClusters={storyClusters}
+      storyClusters={personalizedStoryClusters}
+      affinities={affinities}
+      rules={rules}
       brief={brief}
       patterns={patterns}
       longTermTrends={longTermTrends}

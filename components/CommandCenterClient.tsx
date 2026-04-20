@@ -14,6 +14,7 @@ import {
   setUserImportance,
   type ImportanceLearningProfile,
 } from "@/lib/feedback";
+import { updateAffinitiesFromFeedback } from "@/lib/affinity";
 import { AppShell } from "@/components/AppShell";
 import { DesktopControls } from "@/components/DesktopControls";
 import { FiltersBar } from "@/components/FiltersBar";
@@ -24,7 +25,10 @@ import type {
   Article,
   ArticleDomain,
   ImportanceFeedback,
+  PersonalizationRule,
   StoryCluster,
+  UserAffinity,
+  UserFeedbackAction,
 } from "@/lib/types";
 import type { WeeklyBrief } from "@/lib/brief";
 import type { PatternAnalysis } from "@/lib/patterns";
@@ -36,7 +40,7 @@ import {
   loadUserProfile,
   saveUserProfile,
   scoreArticle,
-  scoreStoryCluster,
+  personalizeStoryCluster,
   type UserProfile,
 } from "@/lib/user";
 
@@ -74,6 +78,8 @@ type CommandCenterClientProps = {
   articles: Article[];
   storyClusters?: StoryCluster[];
   clusters?: StoryCluster[];
+  affinities?: UserAffinity[];
+  rules?: PersonalizationRule[];
   brief: WeeklyBrief;
   patterns: PatternAnalysis;
   longTermTrends: LongTermTrendAnalysis;
@@ -275,6 +281,8 @@ export function CommandCenterClient({
   articles: initialArticles,
   storyClusters: initialStoryClusters,
   clusters: initialClusters,
+  affinities: initialAffinities = [],
+  rules: initialRules = [],
   brief: initialBrief,
   patterns: initialPatterns,
   longTermTrends: initialLongTermTrends,
@@ -299,6 +307,8 @@ export function CommandCenterClient({
   const [personalizedView, setPersonalizedView] = useState(false);
   const [profile, setProfile] = useState<UserProfile>(defaultUserProfile);
   const [feedbackMap, setFeedbackMap] = useState<Record<string, ImportanceFeedback>>({});
+  const [affinities, setAffinities] = useState<UserAffinity[]>(initialAffinities);
+  const [rules, setRules] = useState<PersonalizationRule[]>(initialRules);
   const [learningProfile, setLearningProfile] =
     useState<ImportanceLearningProfile>(loadLearningProfile);
 
@@ -316,6 +326,8 @@ export function CommandCenterClient({
         localInsights,
         localLongTermTrends,
         localFeedback,
+        localAffinities,
+        localRules,
         lastRefresh,
         preferences,
       ] = await Promise.all([
@@ -325,6 +337,8 @@ export function CommandCenterClient({
         window.desktop.data.getInsights(),
         window.desktop.data.getLongTermTrends({ weeks: 12 }),
         window.desktop.data.getImportanceFeedback(),
+        window.desktop.data.getAffinities(),
+        window.desktop.data.getRules(),
         window.desktop.jobs.getLastRefresh(),
         window.desktop.data.getPreferences(),
       ]);
@@ -346,6 +360,8 @@ export function CommandCenterClient({
         setLongTermTrends(localLongTermTrends);
       }
       setFeedbackMap(localFeedback);
+      setAffinities(localAffinities);
+      setRules(localRules);
       const learned = rebuildLearningProfile(localArticles, localFeedback);
       setLearningProfile(learned);
       saveLearningProfile(learned);
@@ -428,7 +444,14 @@ export function CommandCenterClient({
   }, [activeDomain, activeTags, articles, personalizedView, profile, timeRange]);
 
   const filteredClusters = useMemo(() => {
-    return clusters.filter((cluster) => {
+    const sourceClusters = personalizedView
+      ? clusters.flatMap((cluster) => {
+          const personalized = personalizeStoryCluster(cluster, profile, affinities, rules);
+          return personalized ? [personalized] : [];
+        })
+      : clusters;
+
+    return sourceClusters.filter((cluster) => {
       const memberArticles = cluster.articleIds
         .map((id) => articleLookup.get(id))
         .filter((article): article is Article => Boolean(article));
@@ -443,7 +466,17 @@ export function CommandCenterClient({
 
       return matchesTime && matchesDomain && matchesTags && !excluded;
     });
-  }, [activeDomain, activeTags, articleLookup, clusters, personalizedView, profile, timeRange]);
+  }, [
+    activeDomain,
+    activeTags,
+    affinities,
+    articleLookup,
+    clusters,
+    personalizedView,
+    profile,
+    rules,
+    timeRange,
+  ]);
 
   const filteredPatterns = useMemo(() => {
     const tagsToUse = activeTags.length
@@ -480,12 +513,12 @@ export function CommandCenterClient({
   const topSignals = useMemo(() => {
     return [...filteredClusters]
       .sort((left, right) => {
-        const rightScore = personalizedView ? scoreStoryCluster(right, profile) : right.impactScore;
-        const leftScore = personalizedView ? scoreStoryCluster(left, profile) : left.impactScore;
+        const rightScore = personalizedView ? (right.adaptiveScore ?? right.impactScore) : right.impactScore;
+        const leftScore = personalizedView ? (left.adaptiveScore ?? left.impactScore) : left.impactScore;
         return rightScore - leftScore;
       })
       .slice(0, 5);
-  }, [filteredClusters, personalizedView, profile]);
+  }, [filteredClusters, personalizedView]);
 
   const sortedArticles = useMemo(() => {
     return [...filteredArticles].sort((left, right) => {
@@ -503,11 +536,11 @@ export function CommandCenterClient({
 
   const sortedClusters = useMemo(() => {
     return [...filteredClusters].sort((left, right) => {
-      const rightScore = personalizedView ? scoreStoryCluster(right, profile) : right.impactScore;
-      const leftScore = personalizedView ? scoreStoryCluster(left, profile) : left.impactScore;
+      const rightScore = personalizedView ? (right.adaptiveScore ?? right.impactScore) : right.impactScore;
+      const leftScore = personalizedView ? (left.adaptiveScore ?? left.impactScore) : left.impactScore;
       return rightScore - leftScore;
     });
-  }, [filteredClusters, personalizedView, profile]);
+  }, [filteredClusters, personalizedView]);
   const visibleClusters = useMemo(
     () => sortedClusters.slice(0, VISIBLE_CLUSTER_LIMIT),
     [sortedClusters],
@@ -585,18 +618,24 @@ export function CommandCenterClient({
         entities: cluster.entities,
         domain: cluster.domain,
         impactScore: cluster.impactScore,
+        adaptiveScore: cluster.adaptiveScore,
+        personalizationReasons: cluster.personalizationReasons,
         confidence: cluster.confidence,
         articleCount: cluster.articleIds.length,
       })),
+      affinities,
+      rules,
       feedback: feedbackMap,
       learning: learningProfile,
     }),
     [
       activeDomain,
       activeTags,
+      affinities,
       feedbackMap,
       learningProfile,
       personalizedView,
+      rules,
       scoreLookup,
       sortedArticles,
       sortedClusters,
@@ -685,6 +724,46 @@ export function CommandCenterClient({
     void window.desktop?.data.saveImportanceFeedback({
       articleId: article.id,
       reset: true,
+    });
+  };
+
+  const handleClusterFeedback = (
+    cluster: StoryCluster,
+    action: UserFeedbackAction,
+    value?: number,
+  ) => {
+    const feedback = {
+      clusterId: cluster.id,
+      action,
+      value: value ?? null,
+      createdAt: new Date().toISOString(),
+    };
+
+    setAffinities((current) => updateAffinitiesFromFeedback([feedback], [cluster], current));
+
+    if (window.desktop) {
+      void window.desktop.data.saveUserFeedback({
+        clusterId: cluster.id,
+        action,
+        value,
+        cluster,
+      }).then((result) => {
+        if (result.affinities) {
+          setAffinities(result.affinities);
+        }
+      });
+      return;
+    }
+
+    void fetch("/api/feedback/story", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clusterId: cluster.id,
+        action,
+        value,
+        cluster,
+      }),
     });
   };
 
@@ -808,6 +887,7 @@ export function CommandCenterClient({
               articles={articles}
               activeTags={activeTags}
               personalizedView={personalizedView}
+              onClusterFeedback={handleClusterFeedback}
               onTagClick={toggleTag}
               onImportanceChange={handleImportanceChange}
               onImportanceReset={handleImportanceReset}
@@ -828,6 +908,7 @@ export function CommandCenterClient({
               scoreLookup={scoreLookup}
               feedbackMap={feedbackMap}
               learningProfile={learningProfile}
+              onClusterFeedback={handleClusterFeedback}
               onTagClick={toggleTag}
               onImportanceChange={handleImportanceChange}
               onImportanceReset={handleImportanceReset}

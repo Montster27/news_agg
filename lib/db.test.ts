@@ -86,4 +86,70 @@ describe("story cluster database helpers", () => {
     expect(clusters[0]?.whyItMatters).toHaveLength(3);
     expect(clusters[0]?.impactScore).toBe(6.5);
   });
+
+  it("persists user feedback and loads affinities and rules", async () => {
+    process.env.POSTGRES_URL = "postgres://local/test";
+    queryMock.mockImplementation((statement: string) => {
+      const sql = String(statement);
+
+      if (sql.includes("INSERT INTO user_feedback")) {
+        return Promise.resolve({
+        rows: [
+          {
+            id: 1,
+            cluster_id: "cluster-openai-infra",
+            action: "boost",
+            value: null,
+            created_at: "2026-04-20T12:00:00.000Z",
+          },
+        ],
+        });
+      }
+
+      if (sql.includes("FROM user_affinity")) {
+        return Promise.resolve({
+        rows: [
+          {
+            key: "openai",
+            type: "entity",
+            score: 1.5,
+            updated_at: "2026-04-20T12:01:00.000Z",
+          },
+        ],
+        });
+      }
+
+      if (sql.includes("FROM rules")) {
+        return Promise.resolve({
+        rows: [
+          {
+            id: 2,
+            type: "boost",
+            field: "tag",
+            value: "ai_infrastructure",
+            weight: 1,
+          },
+        ],
+        });
+      }
+
+      return Promise.resolve({ rows: [] });
+    });
+
+    const { getAffinities, getRules, saveUserFeedback } = await import("./db");
+    const feedback = await saveUserFeedback({
+      clusterId: "cluster-openai-infra",
+      action: "boost",
+    });
+    const affinities = await getAffinities();
+    const rules = await getRules();
+    const sql = queryMock.mock.calls.map(([statement]) => String(statement)).join("\n");
+
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS user_feedback");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS user_affinity");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS rules");
+    expect(feedback?.clusterId).toBe("cluster-openai-infra");
+    expect(affinities[0]?.key).toBe("openai");
+    expect(rules[0]?.value).toBe("ai_infrastructure");
+  });
 });

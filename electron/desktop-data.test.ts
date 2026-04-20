@@ -22,9 +22,13 @@ const {
   searchStats,
 } = require("./repositories/searchRepo");
 const {
+  getAffinities,
   getLastRefreshStats,
   getImportanceFeedback,
+  getRules,
+  getUserFeedback,
   saveImportanceFeedback,
+  saveUserFeedback,
 } = require("./repositories/preferencesRepo");
 const {
   createSnapshot,
@@ -91,7 +95,7 @@ describe("Electron Phase 2 local data layer", () => {
     const version = db.prepare("SELECT max(version) AS version FROM schema_version").get();
     const articles = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'articles'").get();
 
-    expect(version.version).toBe(2);
+    expect(version.version).toBe(3);
     expect(articles.name).toBe("articles");
   });
 
@@ -129,6 +133,28 @@ describe("Electron Phase 2 local data layer", () => {
 
     expect(result.success).toBe(true);
     expect(feedback["article-1"].userImportance).toBe(3);
+  });
+
+  it("persists cluster feedback and updates affinities", () => {
+    const db = createDb();
+    const result = saveUserFeedback(db, {
+      clusterId: "cluster-openai-infra",
+      action: "boost",
+      cluster: {
+        id: "cluster-openai-infra",
+        tags: ["ai_infrastructure"],
+        entities: [{ name: "OpenAI", normalized: "openai" }],
+        impactScore: 6,
+      },
+    });
+    const feedback = getUserFeedback(db);
+    const affinities = getAffinities(db);
+    const rules = getRules(db);
+
+    expect(result.success).toBe(true);
+    expect(feedback[0].clusterId).toBe("cluster-openai-infra");
+    expect(affinities.some((affinity) => affinity.key === "openai")).toBe(true);
+    expect(rules).toEqual([]);
   });
 
   it("round-trips JSON import and export", async () => {

@@ -12,6 +12,10 @@ contextBridge.exposeInMainWorld("desktop", {
     getInsights: (week) => ipcRenderer.invoke("desktop:data:getInsights", week),
     getLongTermTrends: (filters) => ipcRenderer.invoke("desktop:data:getLongTermTrends", filters),
     getImportanceFeedback: () => ipcRenderer.invoke("desktop:data:getImportanceFeedback"),
+    getUserFeedback: (limit) => ipcRenderer.invoke("desktop:data:getUserFeedback", limit),
+    getAffinities: () => ipcRenderer.invoke("desktop:data:getAffinities"),
+    getRules: () => ipcRenderer.invoke("desktop:data:getRules"),
+    saveUserFeedback: (payload) => ipcRenderer.invoke("desktop:data:saveUserFeedback", payload),
     saveImportanceFeedback: (payload) =>
       ipcRenderer.invoke("desktop:data:saveImportanceFeedback", payload),
     clearLearningProfile: () => ipcRenderer.invoke("desktop:data:clearLearningProfile"),
