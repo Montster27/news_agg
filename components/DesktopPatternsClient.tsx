@@ -1,9 +1,10 @@
-import Link from "next/link";
-import { AppShell } from "@/components/AppShell";
-import { DesktopPatternsClient } from "@/components/DesktopPatternsClient";
-import type { ArticleDomain } from "@/lib/types";
+"use client";
 
-export const dynamic = "force-dynamic";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { AppShell } from "@/components/AppShell";
+import type { PatternAnalysis } from "@/lib/patterns";
+import type { ArticleDomain } from "@/lib/types";
 
 const domains: Array<ArticleDomain | "All"> = [
   "All",
@@ -28,32 +29,61 @@ function deltaColor(delta: number) {
 }
 
 function deltaLabel(delta: number) {
-  if (delta > 0) {
-    return `+${delta}`;
-  }
-
-  return `${delta}`;
+  return delta > 0 ? `+${delta}` : `${delta}`;
 }
 
-export default async function PatternsPage({
-  searchParams,
-}: {
-  searchParams?: Promise<{ domain?: string }>;
-}) {
-  if (process.env.ELECTRON_RENDERER_MODE === "desktop") {
-    return <DesktopPatternsClient />;
-  }
+function emptyAnalysis(domain: ArticleDomain | "All"): PatternAnalysis {
+  return {
+    domain,
+    topTags: [],
+    trendingUp: [],
+    correlations: [],
+    insights: [],
+    generatedAt: new Date().toISOString(),
+  };
+}
 
-  const { ingestFeeds } = await import("@/lib/ingest");
-  const { analyzePatternsWithPersistence } = await import("@/lib/patterns");
-  const { articles } = await ingestFeeds();
-  const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const selectedDomain = domains.includes(
-    (resolvedSearchParams?.domain as ArticleDomain | "All") ?? "All",
-  )
-    ? ((resolvedSearchParams?.domain as ArticleDomain | "All") ?? "All")
-    : "All";
-  const analysis = await analyzePatternsWithPersistence(articles, selectedDomain);
+export function DesktopPatternsClient() {
+  const [selectedDomain, setSelectedDomain] = useState<ArticleDomain | "All">("All");
+  const [analysis, setAnalysis] = useState<PatternAnalysis>(() => emptyAnalysis("All"));
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPatterns() {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const result = await window.desktop?.data.getPatterns({
+          domain: selectedDomain === "All" ? undefined : selectedDomain,
+          limit: 500,
+        });
+
+        if (!cancelled) {
+          setAnalysis((result as PatternAnalysis | undefined) ?? emptyAnalysis(selectedDomain));
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "Unable to load patterns");
+          setAnalysis(emptyAnalysis(selectedDomain));
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadPatterns();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDomain]);
+
   const maxTagCount = analysis.topTags[0]?.count ?? 1;
   const maxCorrelationCount = analysis.correlations[0]?.count ?? 1;
 
@@ -86,9 +116,10 @@ export default async function PatternsPage({
           <section className="panel-divider">
             <div className="flex flex-wrap items-center gap-2">
               {domains.map((domain) => (
-                <Link
+                <button
                   key={domain}
-                  href={domain === "All" ? "/patterns" : `/patterns?domain=${domain}`}
+                  type="button"
+                  onClick={() => setSelectedDomain(domain)}
                   className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                     selectedDomain === domain
                       ? "bg-sky-600 text-white shadow-sm"
@@ -96,13 +127,17 @@ export default async function PatternsPage({
                   }`}
                 >
                   {domain}
-                </Link>
+                </button>
               ))}
             </div>
             <p className="mt-3 text-sm text-slate-500">
-              Updated {new Date(analysis.generatedAt).toLocaleString()} for{" "}
-              {selectedDomain === "All" ? "all domains" : selectedDomain}.
+              {loading
+                ? "Loading local patterns..."
+                : `Updated ${new Date(analysis.generatedAt).toLocaleString()} for ${
+                    selectedDomain === "All" ? "all domains" : selectedDomain
+                  }.`}
             </p>
+            {error ? <p className="mt-3 text-sm text-rose-700">{error}</p> : null}
           </section>
         </section>
 
@@ -112,23 +147,29 @@ export default async function PatternsPage({
             <span className="text-sm text-slate-500">Last 7 days</span>
           </div>
           <div className="mt-4 space-y-3">
-            {analysis.topTags.map((entry) => (
-              <div
-                key={entry.tag}
-                className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4"
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <span className="font-medium text-slate-900">#{entry.tag}</span>
-                  <span className="text-sm text-slate-500">{entry.count} mentions</span>
+            {analysis.topTags.length ? (
+              analysis.topTags.map((entry) => (
+                <div
+                  key={entry.tag}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4"
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="font-medium text-slate-900">#{entry.tag}</span>
+                    <span className="text-sm text-slate-500">{entry.count} mentions</span>
+                  </div>
+                  <div className="mt-3 h-2 rounded-full bg-slate-200">
+                    <div
+                      className="h-2 rounded-full bg-sky-600"
+                      style={{ width: `${(entry.count / maxTagCount) * 100}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="mt-3 h-2 rounded-full bg-slate-200">
-                  <div
-                    className="h-2 rounded-full bg-sky-600"
-                    style={{ width: `${(entry.count / maxTagCount) * 100}%` }}
-                  />
-                </div>
+              ))
+            ) : (
+              <div className="surface-muted text-sm text-slate-500">
+                Local pattern data will appear after a refresh stores articles.
               </div>
-            ))}
+            )}
           </div>
         </section>
 

@@ -1,8 +1,6 @@
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
-import { generateWeeklyBrief } from "@/lib/brief";
-import { ingestFeeds } from "@/lib/ingest";
-import { analyzePatternsWithPersistence } from "@/lib/patterns";
+import { DesktopBriefClient } from "@/components/DesktopBriefClient";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +33,13 @@ export default async function BriefPage({
 }: {
   searchParams?: Promise<{ refresh?: string }>;
 }) {
+  if (process.env.ELECTRON_RENDERER_MODE === "desktop") {
+    return <DesktopBriefClient />;
+  }
+
+  const { generateWeeklyBrief } = await import("@/lib/brief");
+  const { ingestFeeds } = await import("@/lib/ingest");
+  const { analyzePatternsWithPersistence } = await import("@/lib/patterns");
   const { articles } = await ingestFeeds();
   const recentArticles = articles.filter((article) => {
     const ageMs = Date.now() - new Date(article.date).getTime();
