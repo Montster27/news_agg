@@ -126,7 +126,7 @@ function rebuildSearchIndex(db) {
       LEFT JOIN article_tags at ON at.article_id = a.id
       LEFT JOIN tags t ON t.id = at.tag_id
       GROUP BY a.id
-      ORDER BY datetime(a.published_at) DESC
+      ORDER BY a.published_at DESC
     `).all();
     const insert = db.prepare(`
       INSERT INTO article_search (article_id, headline, summary, source, tags_text)
@@ -163,7 +163,11 @@ function searchStats(db) {
 }
 
 function escapeFtsPhrase(value) {
-  return String(value).replace(/"/g, " ").replace(/\s+/g, " ").trim();
+  return String(value)
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/["*:()^~+\-\\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function tokenize(value) {
@@ -215,6 +219,7 @@ function normalizeSearchInput(input = {}) {
     minImportance: Number.isFinite(Number(input.minImportance)) ? Number(input.minImportance) : null,
     personalizedOnly: Boolean(input.personalizedOnly),
     limit: clampLimit(input.limit, 25),
+    recordRecent: Boolean(input.recordRecent),
   };
 }
 
@@ -254,13 +259,13 @@ function buildFilterSql(input, params) {
 
   const from = dateBoundary(input.dateFrom);
   if (from) {
-    where.push("datetime(a.published_at) >= datetime(?)");
+    where.push("a.published_at >= ?");
     params.push(from);
   }
 
   const to = dateBoundary(input.dateTo, true);
   if (to) {
-    where.push("datetime(a.published_at) <= datetime(?)");
+    where.push("a.published_at <= ?");
     params.push(to);
   }
 
@@ -316,7 +321,7 @@ function storeRecentSearch(db, input) {
     DELETE FROM recent_searches
     WHERE id NOT IN (
       SELECT id FROM recent_searches
-      ORDER BY datetime(searched_at) DESC
+      ORDER BY searched_at DESC
       LIMIT ?
     )
   `).run(RECENT_SEARCH_LIMIT);
@@ -411,7 +416,7 @@ function fallbackLikeRows(db, input, params, where) {
     FROM articles a
     LEFT JOIN importance_feedback f ON f.article_id = a.id
     ${whereSql}
-    ORDER BY datetime(a.published_at) DESC, COALESCE(f.user_importance, a.importance, 3) DESC
+    ORDER BY a.published_at DESC, COALESCE(f.user_importance, a.importance, 3) DESC
     LIMIT ?
   `).all(...params, input.limit * 4);
 }
@@ -446,7 +451,7 @@ function querySearch(db, payload = {}) {
         JOIN articles a ON a.id = s.article_id
         LEFT JOIN importance_feedback f ON f.article_id = a.id
         ${whereSql}
-        ORDER BY fts_rank ASC, datetime(a.published_at) DESC
+        ORDER BY fts_rank ASC, a.published_at DESC
         LIMIT ?
       `).all(...params, input.limit * 4);
     } catch {
@@ -472,7 +477,7 @@ function querySearch(db, payload = {}) {
       FROM articles a
       LEFT JOIN importance_feedback f ON f.article_id = a.id
       ${whereSql}
-      ORDER BY datetime(a.published_at) DESC, COALESCE(f.user_importance, a.importance, 3) DESC
+      ORDER BY a.published_at DESC, COALESCE(f.user_importance, a.importance, 3) DESC
       LIMIT ?
     `).all(...params, input.limit * 4);
   }
@@ -481,7 +486,9 @@ function querySearch(db, payload = {}) {
   const enrichedRows = rows.map((row) => ({ ...row, tags: tagMap.get(row.id) ?? [] }));
   const results = mapSearchRows(enrichedRows, Boolean(ftsQuery)).slice(0, input.limit);
 
-  storeRecentSearch(db, input);
+  if (input.recordRecent) {
+    storeRecentSearch(db, input);
+  }
   return results;
 }
 
@@ -516,7 +523,7 @@ function relatedArticles(db, articleId, limit = 8) {
     FROM articles a
     LEFT JOIN importance_feedback f ON f.article_id = a.id
     WHERE a.id != ?
-    ORDER BY datetime(a.published_at) DESC
+    ORDER BY a.published_at DESC
     LIMIT 300
   `).all(articleId);
   const tagMap = getArticleTags(db, rows.map((row) => row.id));
@@ -572,7 +579,7 @@ function recentSearches(db, limit = 10) {
   return db.prepare(`
     SELECT id, query_text, filters_json, searched_at
     FROM recent_searches
-    ORDER BY datetime(searched_at) DESC
+    ORDER BY searched_at DESC
     LIMIT ?
   `).all(Math.min(Math.max(Number(limit) || 10, 1), RECENT_SEARCH_LIMIT)).map((row) => ({
     id: row.id,
@@ -609,7 +616,7 @@ function savedSearches(db) {
   return db.prepare(`
     SELECT id, name, query_text, filters_json, created_at, updated_at
     FROM saved_searches
-    ORDER BY datetime(updated_at) DESC, name ASC
+    ORDER BY updated_at DESC, name ASC
   `).all().map((row) => ({
     id: row.id,
     name: row.name,

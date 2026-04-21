@@ -120,20 +120,22 @@ const migrations = [
           ON recent_searches(searched_at);
       `);
 
-      db.prepare("DELETE FROM article_search").run();
-      db.prepare(`
-        INSERT INTO article_search (article_id, headline, summary, source, tags_text)
-        SELECT
-          a.id,
-          a.headline,
-          COALESCE(a.summary, ''),
-          COALESCE(a.source, ''),
-          COALESCE(group_concat(t.name, ' '), '')
-        FROM articles a
-        LEFT JOIN article_tags at ON at.article_id = a.id
-        LEFT JOIN tags t ON t.id = at.tag_id
-        GROUP BY a.id
-      `).run();
+      const indexed = db.prepare("SELECT count(*) AS count FROM article_search").get();
+      if (!indexed || Number(indexed.count) === 0) {
+        db.prepare(`
+          INSERT INTO article_search (article_id, headline, summary, source, tags_text)
+          SELECT
+            a.id,
+            a.headline,
+            COALESCE(a.summary, ''),
+            COALESCE(a.source, ''),
+            COALESCE(group_concat(t.name, ' '), '')
+          FROM articles a
+          LEFT JOIN article_tags at ON at.article_id = a.id
+          LEFT JOIN tags t ON t.id = at.tag_id
+          GROUP BY a.id
+        `).run();
+      }
     },
   },
   {

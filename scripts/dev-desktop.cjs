@@ -6,8 +6,9 @@ const path = require("node:path");
 
 const ROOT = path.resolve(__dirname, "..");
 const HEALTH_URL = "http://127.0.0.1:3000/api/health";
-const STARTUP_TIMEOUT_MS = 45_000;
-const POLL_INTERVAL_MS = 400;
+const STARTUP_TIMEOUT_MS = 120_000;
+const POLL_INTERVAL_MS = 500;
+const PROBE_TIMEOUT_MS = 15_000;
 
 const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
 const electronBin = path.join(
@@ -58,10 +59,14 @@ function terminateAll(signal = "SIGTERM") {
 
 function requestHealth() {
   return new Promise((resolve) => {
-    const request = http.request(HEALTH_URL, { method: "HEAD", timeout: 2_000 }, (response) => {
-      response.resume();
-      resolve(response.statusCode >= 200 && response.statusCode < 500);
-    });
+    const request = http.request(
+      HEALTH_URL,
+      { method: "GET", timeout: PROBE_TIMEOUT_MS },
+      (response) => {
+        response.resume();
+        resolve(response.statusCode >= 200 && response.statusCode < 500);
+      },
+    );
 
     request.on("error", () => resolve(false));
     request.on("timeout", () => {

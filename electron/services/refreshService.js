@@ -26,8 +26,40 @@ const MAX_CONCURRENT_FEEDS = 3;
 const FEED_BATCH_PAUSE_MS = 150;
 const MEMORY_COOLDOWN_PAUSE_MS = 750;
 
+const HTML_ENTITIES = {
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&quot;": '"',
+  "&#39;": "'",
+  "&apos;": "'",
+  "&nbsp;": " ",
+};
+
+function decodeEntities(value) {
+  return value
+    .replace(/&#x([0-9a-fA-F]+);/g, (_match, hex) => {
+      const code = parseInt(hex, 16);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : "";
+    })
+    .replace(/&#(\d+);/g, (_match, dec) => {
+      const code = parseInt(dec, 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : "";
+    })
+    .replace(/&[a-zA-Z]+;/g, (entity) => HTML_ENTITIES[entity] ?? "");
+}
+
 function stripHtml(value) {
-  return String(value ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  const raw = String(value ?? "");
+  const withoutScriptsAndStyles = raw
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, " ")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ");
+  const decoded = decodeEntities(withoutScriptsAndStyles.replace(/<[^>]+>/g, " "));
+  return decoded
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function createSummary(item) {
@@ -465,7 +497,13 @@ function createRefreshService({
 
     try {
       const result = await runningPromise;
-      onComplete?.(result);
+      if (onComplete) {
+        try {
+          onComplete(result);
+        } catch (callbackError) {
+          console.error("[refreshService] onComplete callback threw:", callbackError);
+        }
+      }
       return result;
     } finally {
       runningPromise = null;

@@ -36,6 +36,18 @@ const {
   importSnapshot,
 } = require("./services/importExportService");
 const { createSearchService } = require("./search");
+const {
+  sanitizeArticleFilters,
+  sanitizeSearchInput,
+  sanitizeSavedSearchPayload,
+  sanitizeWeek,
+  sanitizeArticleId,
+  sanitizeSavedSearchId,
+  sanitizeImportanceFeedback,
+  sanitizeUserFeedback,
+  sanitizePreferences,
+  clampNumber,
+} = require("./ipcValidate");
 
 const DEV_SERVER_URL = process.env.ELECTRON_RENDERER_URL ?? "http://127.0.0.1:3000";
 
@@ -268,7 +280,7 @@ async function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
 
@@ -314,27 +326,28 @@ ipcMain.handle("desktop:exportData", async (event, payload) => {
 });
 
 ipcMain.handle("desktop:data:getTopSignals", (_event, filters = {}) => {
-  return getTopSignals(desktopDb, filters);
+  return getTopSignals(desktopDb, sanitizeArticleFilters(filters));
 });
 
 ipcMain.handle("desktop:data:getArticles", (_event, filters = {}) => {
-  return getArticles(desktopDb, filters);
+  return getArticles(desktopDb, sanitizeArticleFilters(filters));
 });
 
 ipcMain.handle("desktop:data:getPatterns", (_event, filters = {}) => {
-  return getPatterns(desktopDb, filters);
+  return getPatterns(desktopDb, sanitizeArticleFilters(filters));
 });
 
 ipcMain.handle("desktop:data:getBrief", (_event, week) => {
-  return getBrief(desktopDb, typeof week === "string" ? week : undefined);
+  return getBrief(desktopDb, sanitizeWeek(week));
 });
 
 ipcMain.handle("desktop:data:getInsights", (_event, week) => {
-  return getInsights(desktopDb, typeof week === "string" ? week : undefined);
+  return getInsights(desktopDb, sanitizeWeek(week));
 });
 
 ipcMain.handle("desktop:data:getLongTermTrends", (_event, filters = {}) => {
-  return getLongTermTrends(desktopDb, filters.weeks);
+  const weeks = clampNumber(filters?.weeks, { min: 1, max: 520 });
+  return getLongTermTrends(desktopDb, weeks);
 });
 
 ipcMain.handle("desktop:data:getImportanceFeedback", () => {
@@ -342,7 +355,7 @@ ipcMain.handle("desktop:data:getImportanceFeedback", () => {
 });
 
 ipcMain.handle("desktop:data:getUserFeedback", (_event, limit) => {
-  return getUserFeedback(desktopDb, limit);
+  return getUserFeedback(desktopDb, clampNumber(limit, { min: 1, max: 500 }));
 });
 
 ipcMain.handle("desktop:data:getAffinities", () => {
@@ -355,7 +368,7 @@ ipcMain.handle("desktop:data:getRules", () => {
 
 ipcMain.handle("desktop:data:saveUserFeedback", (_event, payload) => {
   try {
-    return saveUserFeedback(desktopDb, payload);
+    return saveUserFeedback(desktopDb, sanitizeUserFeedback(payload));
   } catch (error) {
     return {
       success: false,
@@ -366,7 +379,7 @@ ipcMain.handle("desktop:data:saveUserFeedback", (_event, payload) => {
 
 ipcMain.handle("desktop:data:saveImportanceFeedback", (_event, payload) => {
   try {
-    return saveImportanceFeedback(desktopDb, payload);
+    return saveImportanceFeedback(desktopDb, sanitizeImportanceFeedback(payload));
   } catch (error) {
     return {
       success: false,
@@ -390,7 +403,7 @@ ipcMain.handle("desktop:data:getPreferences", () => ({
 
 ipcMain.handle("desktop:data:savePreferences", (_event, payload = {}) => {
   try {
-    const preferences = savePreferences(desktopDb, payload);
+    const preferences = savePreferences(desktopDb, sanitizePreferences(payload));
     scheduler?.start();
     createMenu();
     notifyRenderer("desktop:preferencesChanged", preferences);
@@ -444,11 +457,11 @@ ipcMain.handle("desktop:exports:exportJson", async (event) => {
 ipcMain.handle("desktop:exports:getSnapshot", () => createSnapshot(desktopDb));
 
 ipcMain.handle("desktop:search:query", (_event, input = {}) => {
-  return searchService.query(input);
+  return searchService.query(sanitizeSearchInput(input));
 });
 
 ipcMain.handle("desktop:search:relatedArticles", (_event, articleId) => {
-  return searchService.relatedArticles(typeof articleId === "string" ? articleId : "");
+  return searchService.relatedArticles(sanitizeArticleId(articleId));
 });
 
 ipcMain.handle("desktop:search:recent", () => {
@@ -456,7 +469,7 @@ ipcMain.handle("desktop:search:recent", () => {
 });
 
 ipcMain.handle("desktop:search:saveSearch", (_event, payload = {}) => {
-  return searchService.saveSearch(payload);
+  return searchService.saveSearch(sanitizeSavedSearchPayload(payload));
 });
 
 ipcMain.handle("desktop:search:savedSearches", () => {
@@ -464,7 +477,7 @@ ipcMain.handle("desktop:search:savedSearches", () => {
 });
 
 ipcMain.handle("desktop:search:deleteSavedSearch", (_event, id) => {
-  return searchService.deleteSavedSearch(id);
+  return searchService.deleteSavedSearch(sanitizeSavedSearchId(id));
 });
 
 ipcMain.handle("desktop:search:rebuildIndex", () => {
