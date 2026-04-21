@@ -8,11 +8,19 @@ export const dynamic = "force-dynamic";
 const domains: Array<ArticleDomain | "All"> = [
   "All",
   "AI",
-  "Chips",
-  "Infra",
+  "Semis",
+  "Cloud",
+  "Security",
+  "Consumer",
   "Bio",
-  "Energy",
-  "Macro",
+  "Climate",
+  "Crypto",
+  "Policy",
+  "Space",
+  "Robotics",
+  "Batteries",
+  "AR",
+  "General",
 ];
 
 function deltaColor(delta: number) {

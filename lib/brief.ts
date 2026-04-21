@@ -1,6 +1,6 @@
 import "server-only";
 
-import { AI_BRIEF_MODEL, getOpenAIClient } from "@/lib/ai-client";
+import { AI_BRIEF_MODEL, getAIClient } from "@/lib/ai-client";
 import { saveBriefToDb } from "@/lib/db";
 import { PatternAnalysis } from "@/lib/patterns";
 import { getStoredBrief, setStoredBrief } from "@/lib/store";
@@ -17,7 +17,7 @@ export type WeeklyBrief = {
   used_fallback: boolean;
 };
 
-const client = getOpenAIClient();
+const client = getAIClient();
 
 const systemPrompt = `You are a senior technology analyst.
 
@@ -27,42 +27,31 @@ Your job:
 - avoid hype
 - focus on directional shifts`;
 
-const briefSchema = {
-  type: "object",
-  properties: {
-    top_shifts: {
-      type: "array",
-      items: { type: "string" },
-      minItems: 3,
-      maxItems: 5,
-    },
-    emerging_patterns: {
-      type: "array",
-      items: { type: "string" },
-      minItems: 3,
-      maxItems: 5,
-    },
-    what_to_watch: {
-      type: "array",
-      items: { type: "string" },
-      minItems: 3,
-      maxItems: 5,
-    },
-    teaching_points: {
-      type: "array",
-      items: { type: "string" },
-      minItems: 2,
-      maxItems: 3,
-    },
-  },
-  required: [
-    "top_shifts",
-    "emerging_patterns",
-    "what_to_watch",
-    "teaching_points",
-  ],
-  additionalProperties: false,
-} as const;
+const briefPromptHint = `Respond with strict JSON only. Shape:
+{
+  "top_shifts": ["3-5 concise bullets"],
+  "emerging_patterns": ["3-5 concise bullets"],
+  "what_to_watch": ["3-5 concise bullets"],
+  "teaching_points": ["2-3 concise bullets"]
+}`;
+
+function extractJson(content: string): unknown {
+  const trimmed = (content || "").trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const first = trimmed.indexOf("{");
+    const last = trimmed.lastIndexOf("}");
+    if (first >= 0 && last > first) {
+      try {
+        return JSON.parse(trimmed.slice(first, last + 1));
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
 
 function normalizeBullets(items: unknown, fallback: string[]) {
   if (!Array.isArray(items)) {
@@ -161,11 +150,7 @@ export async function generateWeeklyBrief(
   }
 
   try {
-    const userPrompt = `Provide:
-- top tags
-- trending tags
-- correlations
-- sample article summaries
+    const userPrompt = `${briefPromptHint}
 
 Pattern data:
 ${JSON.stringify(
@@ -180,41 +165,34 @@ ${JSON.stringify(
 )}
 
 Sample articles:
-${JSON.stringify(sampledArticles, null, 2)}
+${JSON.stringify(sampledArticles, null, 2)}`;
 
-Return JSON only.`;
-
-    const response = await client.chat.completions.create({
+    const response = await client.chat({
       model: AI_BRIEF_MODEL,
+      format: "json",
+      temperature: 0,
+      maxTokens: 800,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "weekly_brief",
-          strict: true,
-          schema: briefSchema,
-        },
-      },
-      max_tokens: 800,
     });
 
-    const parsed = JSON.parse(response.choices[0].message.content || "{}") as Partial<WeeklyBrief>;
+    const parsed = (extractJson(response.content) ?? {}) as Partial<WeeklyBrief>;
+    const fallback = fallbackBrief(patterns);
     const brief: WeeklyBrief = {
-      top_shifts: normalizeBullets(parsed.top_shifts, fallbackBrief(patterns).top_shifts),
+      top_shifts: normalizeBullets(parsed.top_shifts, fallback.top_shifts),
       emerging_patterns: normalizeBullets(
         parsed.emerging_patterns,
-        fallbackBrief(patterns).emerging_patterns,
+        fallback.emerging_patterns,
       ),
       what_to_watch: normalizeBullets(
         parsed.what_to_watch,
-        fallbackBrief(patterns).what_to_watch,
+        fallback.what_to_watch,
       ),
       teaching_points: normalizeBullets(
         parsed.teaching_points,
-        fallbackBrief(patterns).teaching_points,
+        fallback.teaching_points,
       ),
       generated_at: new Date().toISOString(),
       used_fallback: false,

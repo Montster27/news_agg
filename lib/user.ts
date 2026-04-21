@@ -25,7 +25,7 @@ export type UserProfile = {
 };
 
 export const defaultUserProfile: UserProfile = {
-  preferred_domains: ["AI", "Chips"],
+  preferred_domains: ["AI", "Semis"],
   preferred_tags: ["ai_infrastructure", "energy_constraint"],
   excluded_tags: ["consumer_gadgets"],
   importance_weights: {

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { AI_INSIGHT_MODEL, getOpenAIClient } from "@/lib/ai-client";
+import { AI_INSIGHT_MODEL, getAIClient } from "@/lib/ai-client";
 import { saveInsightsToDb } from "@/lib/db";
 import type { PatternAnalysis, TagCorrelation } from "@/lib/patterns";
 import type {
@@ -48,7 +48,7 @@ type InsightCacheEntry = {
   value: InsightEngineResult;
 };
 
-const client = getOpenAIClient();
+const client = getAIClient();
 
 const insightCache = new Map<string, InsightCacheEntry>();
 
@@ -60,31 +60,13 @@ Your job:
 - avoid hype
 - focus on directional shifts`;
 
-const insightSchema = {
-  type: "object",
-  properties: {
-    insights: {
-      type: "array",
-      minItems: 3,
-      maxItems: 5,
-      items: {
-        type: "object",
-        properties: {
-          title: { type: "string" },
-          explanation: { type: "string" },
-          confidence: {
-            type: "string",
-            enum: ["low", "medium", "high"],
-          },
-        },
-        required: ["title", "explanation", "confidence"],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ["insights"],
-  additionalProperties: false,
-} as const;
+const insightPromptHint = `Return JSON shape:
+{
+  "insights": [
+    { "title": "string", "explanation": "string", "confidence": "low" | "medium" | "high" }
+  ]
+}
+Provide 3 to 5 insights.`;
 
 function buildWeekKey(articles: Article[]) {
   return articles[0]?.week ?? new Date().toISOString().slice(0, 7);
@@ -324,7 +306,9 @@ export async function generateInsightReport(params: {
   }
 
   try {
-    const userPrompt = `Signals:
+    const userPrompt = `${insightPromptHint}
+
+Signals:
 ${JSON.stringify(
   {
     inflections,
@@ -340,24 +324,23 @@ ${JSON.stringify(
 
 Return JSON only.`;
 
-    const response = await client.chat.completions.create({
+    const response = await client.chat({
       model: AI_INSIGHT_MODEL,
+      format: "json",
+      temperature: 0,
+      maxTokens: 800,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "insight_report",
-          strict: true,
-          schema: insightSchema,
-        },
-      },
-      max_tokens: 800,
     });
 
-    const parsed = JSON.parse(response.choices[0].message.content || "{}") as { insights?: InsightItem[] };
+    let parsed: { insights?: InsightItem[] };
+    try {
+      parsed = JSON.parse(response.content || "{}") as { insights?: InsightItem[] };
+    } catch {
+      parsed = {};
+    }
     const result = {
       insights: sanitizeInsights(parsed.insights, fallback),
       inflections,

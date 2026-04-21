@@ -27,6 +27,15 @@ const {
   getLongTermTrends,
   getPatterns,
 } = require("./repositories/patternsRepo");
+const {
+  getClusterHistory,
+  getMemoryState,
+  markClusterViewed,
+  markDomainViewed,
+  saveNarrativeThreads,
+  setDomainCollapsed,
+  snapshotClusters,
+} = require("./repositories/memoryRepo");
 const { createNotificationService } = require("./services/notificationService");
 const { createRefreshService } = require("./services/refreshService");
 const { createScheduler } = require("./services/scheduler");
@@ -47,6 +56,10 @@ const {
   sanitizeUserFeedback,
   sanitizePreferences,
   clampNumber,
+  sanitizeClusterIdValue,
+  sanitizeMemoryDomain,
+  sanitizeMemorySnapshotPayload,
+  sanitizeDomainCollapsePayload,
 } = require("./ipcValidate");
 
 const DEV_SERVER_URL = process.env.ELECTRON_RENDERER_URL ?? "http://127.0.0.1:3000";
@@ -486,6 +499,82 @@ ipcMain.handle("desktop:search:rebuildIndex", () => {
 
 ipcMain.handle("desktop:search:stats", () => {
   return searchService.stats();
+});
+
+ipcMain.handle("desktop:memory:getState", () => {
+  try {
+    return getMemoryState(desktopDb);
+  } catch (error) {
+    return {
+      clusterViewStates: {},
+      domainViewStates: {},
+      threads: [],
+      latestSnapshots: {},
+      error: error instanceof Error ? error.message : "Unknown memory error",
+    };
+  }
+});
+
+ipcMain.handle("desktop:memory:snapshotClusters", (_event, payload) => {
+  try {
+    const { clusters, threads, snapshotAt } = sanitizeMemorySnapshotPayload(payload);
+    const snapshotResult = snapshotClusters(desktopDb, clusters, { snapshotAt });
+    const threadResult = threads.length ? saveNarrativeThreads(desktopDb, threads) : { saved: 0 };
+    return {
+      success: true,
+      inserted: snapshotResult.inserted,
+      threadsSaved: threadResult.saved,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Invalid memory payload",
+    };
+  }
+});
+
+ipcMain.handle("desktop:memory:markClusterViewed", (_event, clusterId) => {
+  try {
+    return markClusterViewed(desktopDb, sanitizeClusterIdValue(clusterId));
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Invalid cluster id",
+    };
+  }
+});
+
+ipcMain.handle("desktop:memory:markDomainViewed", (_event, domain) => {
+  try {
+    return markDomainViewed(desktopDb, sanitizeMemoryDomain(domain));
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Invalid domain",
+    };
+  }
+});
+
+ipcMain.handle("desktop:memory:setDomainCollapsed", (_event, payload) => {
+  try {
+    const { domain, collapsed } = sanitizeDomainCollapsePayload(payload);
+    return setDomainCollapsed(desktopDb, domain, collapsed);
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Invalid domain payload",
+    };
+  }
+});
+
+ipcMain.handle("desktop:memory:getClusterHistory", (_event, payload = {}) => {
+  try {
+    const clusterId = sanitizeClusterIdValue(payload?.clusterId);
+    const limit = clampNumber(payload?.limit, { min: 1, max: 50 });
+    return getClusterHistory(desktopDb, clusterId, { limit });
+  } catch (error) {
+    return [];
+  }
 });
 
 app.whenReady().then(async () => {

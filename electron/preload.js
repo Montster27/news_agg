@@ -64,4 +64,17 @@ contextBridge.exposeInMainWorld("desktop", {
       return () => ipcRenderer.removeListener("desktop:preferencesChanged", listener);
     },
   },
+  memory: {
+    getState: () => ipcRenderer.invoke("desktop:memory:getState"),
+    snapshotClusters: (payload) =>
+      ipcRenderer.invoke("desktop:memory:snapshotClusters", payload),
+    markClusterViewed: (clusterId) =>
+      ipcRenderer.invoke("desktop:memory:markClusterViewed", clusterId),
+    markDomainViewed: (domain) =>
+      ipcRenderer.invoke("desktop:memory:markDomainViewed", domain),
+    setDomainCollapsed: (payload) =>
+      ipcRenderer.invoke("desktop:memory:setDomainCollapsed", payload),
+    getClusterHistory: (payload) =>
+      ipcRenderer.invoke("desktop:memory:getClusterHistory", payload),
+  },
 });

@@ -55,7 +55,7 @@ describe("narrative and trend intelligence", () => {
       cluster({
         id: "cluster-3",
         headline: "Battery factory opens",
-        domain: "Energy",
+        domain: "Climate",
         tags: ["battery"],
         entities: [{ name: "Battery", normalized: "battery", type: "technology" }],
       }),

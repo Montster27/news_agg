@@ -17,10 +17,12 @@ import {
 import { updateAffinitiesFromFeedback } from "@/lib/affinity";
 import { AppShell } from "@/components/AppShell";
 import { DesktopControls } from "@/components/DesktopControls";
+import { DomainBreadthView } from "@/components/DomainBreadthView";
 import { FiltersBar } from "@/components/FiltersBar";
+import { KPIStrip, type KPITile } from "@/components/KPIStrip";
+import { MegaStoryStrip } from "@/components/MegaStoryStrip";
 import { OutputGenerationPanel } from "@/components/OutputGenerationPanel";
 import { SearchCommandPanel } from "@/components/SearchCommandPanel";
-import { TopSignals } from "@/components/TopSignals";
 import { extractEntities, mergeEntities } from "@/lib/entities";
 import { buildNarrativeThreads } from "@/lib/narratives";
 import { computeConnections } from "@/lib/connections";
@@ -56,6 +58,12 @@ import {
   personalizeStoryCluster,
   type UserProfile,
 } from "@/lib/user";
+import {
+  deriveThreadsFromClusters,
+  EMPTY_MEMORY_STATE,
+  reconcileThreads,
+  type MemoryState,
+} from "@/lib/memory";
 
 const WeeklyShifts = dynamic(
   () => import("@/components/WeeklyShifts").then((mod) => mod.WeeklyShifts),
@@ -75,17 +83,10 @@ const TrendsPanel = dynamic(
     loading: () => <div className="surface-card h-80 animate-pulse bg-slate-100 p-6" />,
   },
 );
-const ArticleList = dynamic(
-  () => import("@/components/ArticleList").then((mod) => mod.ArticleList),
-  {
-    loading: () => <div className="surface-card h-96 animate-pulse bg-slate-100 p-6" />,
-  },
-);
 
 const DESKTOP_ARTICLE_LIMIT = 200;
 const CLUSTER_INPUT_LIMIT = 120;
-const VISIBLE_CLUSTER_LIMIT = 40;
-const VISIBLE_ARTICLE_LIMIT = 120;
+const MEGA_STORY_LIMIT = 3;
 
 type CommandCenterClientProps = {
   articles: Article[];
@@ -115,17 +116,32 @@ function inferRelatedTag(text: string, tags: string[]) {
 }
 
 function withinRange(article: Article, range: "today" | "week" | "month") {
-  const age = Date.now() - new Date(article.date).getTime();
+  if (!article.date) {
+    return true;
+  }
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  const endOfDay = new Date(article.date).getTime() + dayMs;
+
+  if (Number.isNaN(endOfDay)) {
+    return true;
+  }
+
+  const age = Date.now() - endOfDay;
+
+  if (age <= 0) {
+    return true;
+  }
 
   if (range === "today") {
-    return age <= 24 * 60 * 60 * 1000;
+    return age <= dayMs;
   }
 
   if (range === "week") {
-    return age <= 7 * 24 * 60 * 60 * 1000;
+    return age <= 7 * dayMs;
   }
 
-  return age <= 30 * 24 * 60 * 60 * 1000;
+  return age <= 30 * dayMs;
 }
 
 const CLIENT_STOP_WORDS = new Set([
@@ -336,61 +352,83 @@ export function CommandCenterClient({
   const [rules, setRules] = useState<PersonalizationRule[]>(initialRules);
   const [learningProfile, setLearningProfile] =
     useState<ImportanceLearningProfile>(loadLearningProfile);
+  const [memoryState, setMemoryState] = useState<MemoryState>(EMPTY_MEMORY_STATE);
 
   const loadDesktopData = useCallback(async () => {
     if (!window.desktop) {
       return;
     }
 
-    try {
-      setRefreshStatus("Reading local cache");
-      const [
-        localArticles,
-        localPatterns,
-        localBrief,
-        localInsights,
-        localLongTermTrends,
-        localFeedback,
-        localAffinities,
-        localRules,
-        lastRefresh,
-        preferences,
-      ] = await Promise.all([
-        window.desktop.data.getArticles({ limit: DESKTOP_ARTICLE_LIMIT }),
-        window.desktop.data.getPatterns({ limit: 500 }),
-        window.desktop.data.getBrief(),
-        window.desktop.data.getInsights(),
-        window.desktop.data.getLongTermTrends({ weeks: 12 }),
-        window.desktop.data.getImportanceFeedback(),
-        window.desktop.data.getAffinities(),
-        window.desktop.data.getRules(),
-        window.desktop.jobs.getLastRefresh(),
-        window.desktop.data.getPreferences(),
-      ]);
+    setRefreshStatus("Reading local cache");
+    const settled = await Promise.allSettled([
+      window.desktop.data.getArticles({ limit: DESKTOP_ARTICLE_LIMIT }),
+      window.desktop.data.getPatterns({ limit: 500 }),
+      window.desktop.data.getBrief(),
+      window.desktop.data.getInsights(),
+      window.desktop.data.getLongTermTrends({ weeks: 12 }),
+      window.desktop.data.getImportanceFeedback(),
+      window.desktop.data.getAffinities(),
+      window.desktop.data.getRules(),
+      window.desktop.jobs.getLastRefresh(),
+      window.desktop.data.getPreferences(),
+      window.desktop.memory?.getState() ?? Promise.resolve(EMPTY_MEMORY_STATE),
+    ]);
 
-      setArticles(localArticles);
-      setClusters([]);
-      setRefreshStatus("Clustering local stories");
-      window.setTimeout(() => {
-        setClusters(buildClientClusters(localArticles));
-      }, 0);
+    const pick = <T,>(result: PromiseSettledResult<T>, fallback: T): T =>
+      result.status === "fulfilled" ? result.value : fallback;
+
+    const localArticles = pick(settled[0] as PromiseSettledResult<Article[]>, [] as Article[]);
+    if (settled[0].status === "rejected") {
+      console.warn("[desktop] getArticles failed", settled[0].reason);
+      setRefreshStatus("Local cache unavailable");
+      return;
+    }
+
+    setArticles(localArticles);
+    setClusters([]);
+    setRefreshStatus("Clustering local stories");
+    window.setTimeout(() => {
+      setClusters(buildClientClusters(localArticles));
+    }, 0);
+
+    const localPatterns = settled[1].status === "fulfilled" ? settled[1].value : null;
+    if (localPatterns) {
       setPatterns(localPatterns);
-      if (localBrief) {
-        setBrief(localBrief);
-      }
-      if (localInsights.insights.length) {
-        setInsightReport(localInsights);
-      }
-      if (localLongTermTrends.available) {
-        setLongTermTrends(localLongTermTrends);
-      }
-      setFeedbackMap(localFeedback);
-      setAffinities(localAffinities);
-      setRules(localRules);
-      const learned = rebuildLearningProfile(localArticles, localFeedback);
-      setLearningProfile(learned);
-      saveLearningProfile(learned);
-      setFetchedAt(lastRefresh ?? localArticles[0]?.processed_at ?? initialFetchedAt);
+    }
+
+    const localBrief = settled[2].status === "fulfilled" ? settled[2].value : null;
+    if (localBrief) {
+      setBrief(localBrief);
+    }
+
+    const localInsights = settled[3].status === "fulfilled" ? settled[3].value : null;
+    if (localInsights && localInsights.insights.length) {
+      setInsightReport(localInsights);
+    }
+
+    const localLongTermTrends = settled[4].status === "fulfilled" ? settled[4].value : null;
+    if (localLongTermTrends && localLongTermTrends.available) {
+      setLongTermTrends(localLongTermTrends);
+    }
+
+    const localFeedback = pick(
+      settled[5] as PromiseSettledResult<Record<string, ImportanceFeedback>>,
+      {} as Record<string, ImportanceFeedback>,
+    );
+    setFeedbackMap(localFeedback);
+
+    setAffinities(pick(settled[6] as PromiseSettledResult<UserAffinity[]>, []));
+    setRules(pick(settled[7] as PromiseSettledResult<PersonalizationRule[]>, []));
+
+    const lastRefresh = settled[8].status === "fulfilled" ? settled[8].value : null;
+
+    const learned = rebuildLearningProfile(localArticles, localFeedback);
+    setLearningProfile(learned);
+    saveLearningProfile(learned);
+    setFetchedAt(lastRefresh ?? localArticles[0]?.processed_at ?? initialFetchedAt);
+
+    const preferences = settled[9].status === "fulfilled" ? settled[9].value : null;
+    if (preferences) {
       setPersonalizedView(preferences.personalizedDefault);
       setRefreshStatus(
         preferences.lastRefreshError
@@ -399,8 +437,18 @@ export function CommandCenterClient({
             ? "Local cache"
             : "Local cache empty",
       );
-    } catch {
-      setRefreshStatus("Local cache unavailable");
+    } else {
+      setRefreshStatus(lastRefresh ? "Local cache" : "Local cache empty");
+    }
+
+    const memoryResult = settled[10]?.status === "fulfilled" ? settled[10].value : null;
+    if (memoryResult && !memoryResult.error) {
+      setMemoryState({
+        clusterViewStates: memoryResult.clusterViewStates ?? {},
+        domainViewStates: memoryResult.domainViewStates ?? {},
+        threads: memoryResult.threads ?? [],
+        latestSnapshots: memoryResult.latestSnapshots ?? {},
+      });
     }
   }, [initialFetchedAt]);
 
@@ -555,14 +603,18 @@ export function CommandCenterClient({
     return filtered.slice(0, 8);
   }, [activeTags, initialTrendSignals, patterns.generatedAt, patterns.trendingUp]);
 
-  const topSignals = useMemo(() => {
+  const megaStories = useMemo(() => {
     return [...filteredClusters]
       .sort((left, right) => {
-        const rightScore = personalizedView ? (right.adaptiveScore ?? right.impactScore) : right.impactScore;
-        const leftScore = personalizedView ? (left.adaptiveScore ?? left.impactScore) : left.impactScore;
+        const rightScore = personalizedView
+          ? (right.adaptiveScore ?? right.impactScore)
+          : right.impactScore;
+        const leftScore = personalizedView
+          ? (left.adaptiveScore ?? left.impactScore)
+          : left.impactScore;
         return rightScore - leftScore;
       })
-      .slice(0, 5);
+      .slice(0, MEGA_STORY_LIMIT);
   }, [filteredClusters, personalizedView]);
 
   const sortedArticles = useMemo(() => {
@@ -586,6 +638,83 @@ export function CommandCenterClient({
       return rightScore - leftScore;
     });
   }, [filteredClusters, personalizedView]);
+
+  const derivedThreads = useMemo(
+    () => deriveThreadsFromClusters(clusters),
+    [clusters],
+  );
+
+  const mergedMemoryState = useMemo<MemoryState>(() => {
+    const persistedIds = new Set(memoryState.threads.map((thread) => thread.id));
+    const seed = memoryState.threads;
+    const newFromDerived = derivedThreads.threads.filter(
+      (thread) => !persistedIds.has(thread.id),
+    );
+    return {
+      ...memoryState,
+      threads: reconcileThreads([...seed, ...newFromDerived], memoryState.threads),
+    };
+  }, [derivedThreads, memoryState]);
+
+  useEffect(() => {
+    if (!window.desktop?.memory || clusters.length === 0) return;
+    const payload = {
+      clusters,
+      threads: derivedThreads.threads,
+      snapshotAt: new Date().toISOString(),
+    };
+    void window.desktop.memory.snapshotClusters(payload).catch((error) => {
+      console.warn("[memory] snapshotClusters failed", error);
+    });
+  }, [clusters, derivedThreads]);
+
+  const markClusterViewed = useCallback((clusterId: string) => {
+    setMemoryState((current) => ({
+      ...current,
+      clusterViewStates: {
+        ...current.clusterViewStates,
+        [clusterId]: new Date().toISOString(),
+      },
+    }));
+    void window.desktop?.memory?.markClusterViewed(clusterId);
+  }, []);
+
+  const markDomainViewed = useCallback((domain: ArticleDomain) => {
+    setMemoryState((current) => {
+      const entry = current.domainViewStates[domain];
+      return {
+        ...current,
+        domainViewStates: {
+          ...current.domainViewStates,
+          [domain]: {
+            lastViewedAt: new Date().toISOString(),
+            collapsed: entry?.collapsed ?? false,
+          },
+        },
+      };
+    });
+    void window.desktop?.memory?.markDomainViewed(domain);
+  }, []);
+
+  const setDomainCollapsedState = useCallback(
+    (domain: ArticleDomain, collapsed: boolean) => {
+      setMemoryState((current) => {
+        const entry = current.domainViewStates[domain];
+        return {
+          ...current,
+          domainViewStates: {
+            ...current.domainViewStates,
+            [domain]: {
+              lastViewedAt: entry?.lastViewedAt ?? new Date().toISOString(),
+              collapsed,
+            },
+          },
+        };
+      });
+      void window.desktop?.memory?.setDomainCollapsed({ domain, collapsed });
+    },
+    [],
+  );
   const narrativeThreads = useMemo(
     () => {
       const built = buildNarrativeThreads(sortedClusters);
@@ -633,15 +762,6 @@ export function CommandCenterClient({
     () => initialWatchItems.length ? initialWatchItems : scenarios.map(generateWatchItems),
     [initialWatchItems, scenarios],
   );
-  const visibleClusters = useMemo(
-    () => sortedClusters.slice(0, VISIBLE_CLUSTER_LIMIT),
-    [sortedClusters],
-  );
-  const visibleArticles = useMemo(
-    () => sortedArticles.slice(0, VISIBLE_ARTICLE_LIMIT),
-    [sortedArticles],
-  );
-
   const orderedWeeklyShifts = useMemo(() => {
     if (!personalizedView) {
       return brief.top_shifts;
@@ -672,12 +792,103 @@ export function CommandCenterClient({
     timeRange === "today" ? "Today" : timeRange === "week" ? "This Week" : "This Month";
   const activeFilterCount =
     (activeDomain === "All" ? 0 : 1) + activeTags.length + (personalizedView ? 1 : 0);
-  const lastRefreshLabel = new Date(fetchedAt).toLocaleString(undefined, {
+  const lastRefreshDate = new Date(fetchedAt);
+  const lastRefreshLabel = lastRefreshDate.toLocaleString(undefined, {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
   });
+
+  const kpiTiles = useMemo<KPITile[]>(() => {
+    const windowDays = timeRange === "today" ? 1 : timeRange === "week" ? 7 : 30;
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const buckets = Array.from({ length: windowDays }, () => 0);
+
+    for (const article of articles) {
+      const age = now - new Date(article.date).getTime();
+      if (age < 0 || age > windowDays * dayMs) continue;
+      const idx = Math.min(windowDays - 1, Math.floor(age / dayMs));
+      buckets[windowDays - 1 - idx] += 1;
+    }
+
+    const activityData = windowDays > 1 ? buckets : [Math.max(0, buckets[0]), buckets[0]];
+
+    const signalsCount = megaStories.length;
+    const signalsSpark = megaStories.length
+      ? megaStories.map((cluster) => cluster.impactScore)
+      : [0, 0];
+
+    const uniqueSources = new Set<string>();
+    for (const cluster of sortedClusters) {
+      for (const source of cluster.sources) uniqueSources.add(source);
+    }
+    const sourcesCount = uniqueSources.size;
+
+    const impactAvg = megaStories.length
+      ? megaStories.reduce((sum, cluster) => sum + cluster.impactScore, 0) /
+        megaStories.length
+      : 0;
+    const impactSpark = sortedClusters.length
+      ? sortedClusters.slice(0, 8).map((cluster) => cluster.impactScore)
+      : [0, 0];
+
+    const filteredCount = filteredArticles.length;
+    const prevWindowStart = now - 2 * windowDays * dayMs;
+    const prevWindowEnd = now - windowDays * dayMs;
+    const currentWindowCount = articles.filter((article) => {
+      const t = new Date(article.date).getTime();
+      return t >= prevWindowEnd;
+    }).length;
+    const prevWindowCount = articles.filter((article) => {
+      const t = new Date(article.date).getTime();
+      return t >= prevWindowStart && t < prevWindowEnd;
+    }).length;
+    const articleDelta =
+      prevWindowCount > 0
+        ? Math.round(((currentWindowCount - prevWindowCount) / prevWindowCount) * 100)
+        : currentWindowCount > 0
+          ? 100
+          : 0;
+    const articleDeltaDirection: KPITile["deltaDirection"] =
+      articleDelta > 0 ? "up" : articleDelta < 0 ? "down" : "flat";
+
+    return [
+      {
+        label: "Mega stories",
+        value: String(signalsCount),
+        delta: personalizedView ? "personal" : "top 3",
+        deltaDirection: "flat",
+        spark: signalsSpark,
+        sparkColor: "#0284c7",
+      },
+      {
+        label: "Sources",
+        value: String(sourcesCount),
+        delta: `${sortedClusters.length} clusters`,
+        deltaDirection: "flat",
+        spark: activityData,
+        sparkColor: "#0f766e",
+      },
+      {
+        label: "Impact",
+        value: impactAvg.toFixed(1),
+        delta: "avg",
+        deltaDirection: "flat",
+        spark: impactSpark,
+        sparkColor: "#f59e0b",
+      },
+      {
+        label: "Coverage",
+        value: String(filteredCount),
+        delta: `${articleDelta > 0 ? "+" : ""}${articleDelta}%`,
+        deltaDirection: articleDeltaDirection,
+        spark: activityData,
+        sparkColor: articleDelta >= 0 ? "#059669" : "#e11d48",
+      },
+    ];
+  }, [articles, filteredArticles.length, megaStories, personalizedView, sortedClusters, timeRange]);
   const desktopExportPayload = useMemo(
     () => ({
       exportedAt: new Date().toISOString(),
@@ -944,7 +1155,7 @@ export function CommandCenterClient({
     <AppShell aside={rightRail} activePath="/">
       <div className="space-y-6">
         <header className="surface-card p-5 sm:p-6">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
             <div className="min-w-0">
               <p className="section-kicker">Tech Intelligence</p>
               <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">
@@ -953,26 +1164,19 @@ export function CommandCenterClient({
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
                 High-signal articles, shifts, and trend context in one scanning view.
               </p>
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                <span className="live-dot">{headerLabel} · updated {lastRefreshLabel}</span>
+                <span className="font-mono uppercase tracking-[0.08em] text-slate-400">
+                  {activeFilterCount
+                    ? `${activeFilterCount} filter${activeFilterCount === 1 ? "" : "s"} active`
+                    : "No filters"}
+                </span>
+              </div>
             </div>
+          </div>
 
-            <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px]">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <div className="text-[11px] font-semibold uppercase text-slate-500">Window</div>
-                <div className="mt-1 text-sm font-semibold text-slate-900">{headerLabel}</div>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <div className="text-[11px] font-semibold uppercase text-slate-500">Articles</div>
-                <div className="mt-1 text-sm font-semibold text-slate-900">
-                  {sortedClusters.length} clusters
-                </div>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <div className="text-[11px] font-semibold uppercase text-slate-500">Filters</div>
-                <div className="mt-1 text-sm font-semibold text-slate-900">
-                  {activeFilterCount || "None"}
-                </div>
-              </div>
-            </div>
+          <div className="mt-5">
+            <KPIStrip tiles={kpiTiles} />
           </div>
 
           <div className="panel-divider flex flex-col gap-3 text-sm text-slate-500 lg:flex-row lg:items-center lg:justify-between">
@@ -1021,15 +1225,40 @@ export function CommandCenterClient({
 
         {articles.length ? (
           <>
-            <TopSignals
-              clusters={topSignals}
-              articles={articles}
+            <MegaStoryStrip
+              clusters={megaStories}
+              articleLookup={articleLookup}
+              scenarios={scenarios}
+              implications={implications}
+              watchItems={watchItems}
               activeTags={activeTags}
+              feedbackMap={feedbackMap}
+              learningProfile={learningProfile}
               personalizedView={personalizedView}
+              scoreLookup={scoreLookup}
+              memoryState={mergedMemoryState}
+              onTagClick={toggleTag}
               onClusterFeedback={handleClusterFeedback}
+              onImportanceChange={handleImportanceChange}
+              onImportanceReset={handleImportanceReset}
+              onClusterViewed={markClusterViewed}
+            />
+
+            <DomainBreadthView
+              clusters={sortedClusters}
+              articleLookup={articleLookup}
+              feedbackMap={feedbackMap}
+              learningProfile={learningProfile}
+              personalizedView={personalizedView}
+              scoreLookup={scoreLookup}
+              activeTags={activeTags}
+              memoryState={mergedMemoryState}
               onTagClick={toggleTag}
               onImportanceChange={handleImportanceChange}
               onImportanceReset={handleImportanceReset}
+              onClusterViewed={markClusterViewed}
+              onDomainViewed={markDomainViewed}
+              onDomainCollapsed={setDomainCollapsedState}
             />
 
             <OutputGenerationPanel data={outputData} />
@@ -1037,23 +1266,6 @@ export function CommandCenterClient({
             <div className="xl:hidden">
               {rightRail}
             </div>
-
-            <ArticleList
-              articles={visibleArticles}
-              clusters={visibleClusters}
-              allArticles={articles}
-              totalArticleCount={sortedArticles.length}
-              totalClusterCount={sortedClusters.length}
-              activeTags={activeTags}
-              personalizedView={personalizedView}
-              scoreLookup={scoreLookup}
-              feedbackMap={feedbackMap}
-              learningProfile={learningProfile}
-              onClusterFeedback={handleClusterFeedback}
-              onTagClick={toggleTag}
-              onImportanceChange={handleImportanceChange}
-              onImportanceReset={handleImportanceReset}
-            />
           </>
         ) : (
           <section className="surface-card p-5 sm:p-6">

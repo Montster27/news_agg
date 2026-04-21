@@ -79,7 +79,7 @@ describe("personal intelligence layer", () => {
     const baseline = cluster({
       id: "baseline",
       headline: "Grid storage startup opens factory",
-      domain: "Energy",
+      domain: "Climate",
       tags: ["grid", "battery"],
       entities: [{ name: "Grid Storage", normalized: "grid_storage", type: "technology" }],
       impactScore: 6.5,
@@ -91,7 +91,7 @@ describe("personal intelligence layer", () => {
 
     const ranked = [target, baseline]
       .map((item) => personalizeStoryCluster(item, profile, affinities, []))
-      .filter((item): item is StoryCluster => Boolean(item))
+      .filter((item): item is NonNullable<typeof item> => item !== null)
       .sort(
         (left, right) =>
           (right.adaptiveScore ?? right.impactScore) -

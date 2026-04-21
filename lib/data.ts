@@ -2,10 +2,19 @@ import { Article, ArticleDomain } from "@/lib/types";
 
 export const dashboardGroups = [
   { title: "AI", domains: ["AI"] },
-  { title: "Chips", domains: ["Chips"] },
-  { title: "Infra", domains: ["Infra"] },
-  { title: "Frontier Tech", domains: ["Bio", "Energy", "Frontier"] },
-  { title: "Macro", domains: ["Macro", "General"] },
+  { title: "Semis", domains: ["Semis"] },
+  { title: "Cloud", domains: ["Cloud"] },
+  { title: "Security", domains: ["Security"] },
+  { title: "Consumer", domains: ["Consumer"] },
+  { title: "Bio", domains: ["Bio"] },
+  { title: "Climate", domains: ["Climate"] },
+  { title: "Crypto", domains: ["Crypto"] },
+  { title: "Policy", domains: ["Policy"] },
+  { title: "Space", domains: ["Space"] },
+  { title: "Robotics", domains: ["Robotics"] },
+  { title: "Batteries", domains: ["Batteries"] },
+  { title: "AR", domains: ["AR"] },
+  { title: "General", domains: ["General"] },
 ] satisfies { title: string; domains: ArticleDomain[] }[];
 
 export const fallbackArticles: Article[] = [];

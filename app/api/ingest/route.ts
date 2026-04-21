@@ -4,7 +4,22 @@ import { formatWeek } from "@/lib/ingest";
 import { generateWhyItMatters } from "@/lib/why-it-matters";
 import { Article, ArticleDomain } from "@/lib/types";
 
-const domains: ArticleDomain[] = ["AI", "Chips", "Infra", "Bio", "Energy", "Macro"];
+const domains: ArticleDomain[] = [
+  "AI",
+  "Semis",
+  "Cloud",
+  "Security",
+  "Consumer",
+  "Bio",
+  "Climate",
+  "Crypto",
+  "Policy",
+  "Space",
+  "Robotics",
+  "Batteries",
+  "AR",
+  "General",
+];
 
 type IngestPayload = {
   headline?: string;
@@ -48,7 +63,7 @@ export async function POST(request: NextRequest) {
 
   const domain = domains.includes(body.domain as ArticleDomain)
     ? (body.domain as ArticleDomain)
-    : "Macro";
+    : "General";
 
   const sourceText = [body.headline, body.content].filter(Boolean).join(". ");
   const tags = inferTags(sourceText);

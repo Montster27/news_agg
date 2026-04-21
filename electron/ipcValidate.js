@@ -110,6 +110,117 @@ function sanitizeUserFeedback(input) {
   };
 }
 
+const ALLOWED_MEMORY_DOMAINS = new Set([
+  "AI",
+  "Semis",
+  "Cloud",
+  "Security",
+  "Consumer",
+  "Bio",
+  "Climate",
+  "Crypto",
+  "Policy",
+  "Space",
+  "Robotics",
+  "Batteries",
+  "AR",
+  "General",
+]);
+
+function sanitizeMemoryDomain(value) {
+  const s = clampString(value, 32);
+  return s && ALLOWED_MEMORY_DOMAINS.has(s) ? s : undefined;
+}
+
+function sanitizeClusterIdValue(value) {
+  return clampString(value, 256);
+}
+
+function sanitizeClusterSnapshotArray(input) {
+  if (!Array.isArray(input)) return [];
+  const out = [];
+  for (const entry of input.slice(0, 200)) {
+    if (!entry || typeof entry !== "object") continue;
+    const id = sanitizeClusterIdValue(entry.id);
+    if (!id) continue;
+    out.push({
+      id,
+      headline: clampString(entry.headline, 400),
+      summary: clampString(entry.summary, 600),
+      domain: sanitizeMemoryDomain(entry.domain),
+      domainSecondary: clampStringArray(entry.domainSecondary, 32).filter((value) =>
+        ALLOWED_MEMORY_DOMAINS.has(value),
+      ),
+      tags: clampStringArray(entry.tags, 120),
+      entities: Array.isArray(entry.entities)
+        ? entry.entities
+            .slice(0, 30)
+            .map((raw) => {
+              if (!raw || typeof raw !== "object") return null;
+              const normalized = clampString(raw.normalized, 200);
+              if (!normalized) return null;
+              return {
+                name: clampString(raw.name, 200) ?? normalized,
+                normalized,
+                type: clampString(raw.type, 40) ?? "other",
+              };
+            })
+            .filter(Boolean)
+        : [],
+      articleIds: clampStringArray(entry.articleIds, 256),
+      sources: clampStringArray(entry.sources, 240),
+      sourceCount: clampNumber(entry.sourceCount, { min: 0, max: 10000 }) ?? 0,
+      confidence: ["low", "medium", "high"].includes(entry.confidence)
+        ? entry.confidence
+        : "low",
+      impactScore: clampNumber(entry.impactScore, { min: 0, max: 10 }),
+      firstSeenAt: clampString(entry.firstSeenAt, 40),
+      lastSeenAt: clampString(entry.lastSeenAt, 40),
+    });
+  }
+  return out;
+}
+
+function sanitizeNarrativeThreadArray(input) {
+  if (!Array.isArray(input)) return [];
+  const out = [];
+  for (const entry of input.slice(0, 100)) {
+    if (!entry || typeof entry !== "object") continue;
+    const id = clampString(entry.id, 256);
+    if (!id) continue;
+    out.push({
+      id,
+      title: clampString(entry.title, 400) ?? id,
+      startedAt:
+        clampString(entry.startedAt, 40) ?? clampString(entry.firstSeenAt, 40),
+      lastUpdatedAt:
+        clampString(entry.lastUpdatedAt, 40) ?? clampString(entry.lastSeenAt, 40),
+      summary: entry.summary && typeof entry.summary === "object" ? entry.summary : null,
+      summaryText: clampString(entry.summaryText ?? entry.summary, 2000),
+      clusterIds: clampStringArray(entry.clusterIds, 256),
+      lastSeenAt: clampString(entry.lastSeenAt, 40),
+    });
+  }
+  return out;
+}
+
+function sanitizeMemorySnapshotPayload(input) {
+  const src = pickObject(input);
+  return {
+    clusters: sanitizeClusterSnapshotArray(src.clusters),
+    threads: sanitizeNarrativeThreadArray(src.threads),
+    snapshotAt: clampString(src.snapshotAt, 40),
+  };
+}
+
+function sanitizeDomainCollapsePayload(input) {
+  const src = pickObject(input);
+  return {
+    domain: sanitizeMemoryDomain(src.domain),
+    collapsed: Boolean(src.collapsed),
+  };
+}
+
 function sanitizePreferences(input) {
   const src = pickObject(input);
   return {
@@ -135,4 +246,8 @@ module.exports = {
   sanitizeImportanceFeedback,
   sanitizeUserFeedback,
   sanitizePreferences,
+  sanitizeClusterIdValue,
+  sanitizeMemoryDomain,
+  sanitizeMemorySnapshotPayload,
+  sanitizeDomainCollapsePayload,
 };

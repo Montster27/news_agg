@@ -122,6 +122,61 @@ declare global {
     lastIndexedAt: string | null;
   };
 
+  type DesktopMemoryThread = {
+    id: string;
+    title: string;
+    startedAt: string;
+    lastUpdatedAt: string;
+    summary: { text?: string } | null;
+    clusterIds: string[];
+  };
+
+  type DesktopMemoryClusterSnapshot = {
+    articleCount: number;
+    snapshotAt: string;
+    impactScore: number | null;
+    firstSeenAt: string | null;
+    lastSeenAt: string | null;
+  };
+
+  type DesktopMemoryLayerState = {
+    clusterViewStates: Record<string, string>;
+    domainViewStates: Record<
+      string,
+      { lastViewedAt: string; collapsed: boolean }
+    >;
+    threads: DesktopMemoryThread[];
+    latestSnapshots: Record<string, DesktopMemoryClusterSnapshot>;
+    error?: string;
+  };
+
+  type DesktopMemorySnapshotPayload = {
+    clusters: Array<import("@/lib/types").StoryCluster>;
+    threads?: Array<{
+      id: string;
+      title: string;
+      startedAt?: string;
+      lastUpdatedAt?: string;
+      firstSeenAt?: string;
+      lastSeenAt?: string;
+      summary?: Record<string, unknown> | null;
+      summaryText?: string | null;
+      clusterIds: string[];
+    }>;
+    snapshotAt?: string;
+  };
+
+  type DesktopMemoryHistoryEntry = {
+    id: number;
+    clusterId: string;
+    snapshotAt: string;
+    articleCount: number;
+    impactScore: number | null;
+    primaryDomain: string | null;
+    secondaryDomains: string[];
+    summary: Record<string, unknown>;
+  };
+
   interface Window {
     desktop?: {
       appInfo: () => Promise<{
@@ -205,6 +260,40 @@ declare global {
       };
       preferences: {
         onChanged: (callback: (payload: DesktopPreferences) => void) => () => void;
+      };
+      memory: {
+        getState: () => Promise<DesktopMemoryLayerState>;
+        snapshotClusters: (payload: DesktopMemorySnapshotPayload) => Promise<{
+          success: boolean;
+          inserted?: number;
+          threadsSaved?: number;
+          error?: string;
+        }>;
+        markClusterViewed: (clusterId: string) => Promise<{
+          success: boolean;
+          clusterId?: string;
+          lastViewedAt?: string;
+          error?: string;
+        }>;
+        markDomainViewed: (domain: string) => Promise<{
+          success: boolean;
+          domain?: string;
+          lastViewedAt?: string;
+          error?: string;
+        }>;
+        setDomainCollapsed: (payload: {
+          domain: string;
+          collapsed: boolean;
+        }) => Promise<{
+          success: boolean;
+          domain?: string;
+          collapsed?: boolean;
+          error?: string;
+        }>;
+        getClusterHistory: (payload: {
+          clusterId: string;
+          limit?: number;
+        }) => Promise<DesktopMemoryHistoryEntry[]>;
       };
     };
   }

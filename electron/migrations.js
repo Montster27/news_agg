@@ -175,6 +175,83 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 4,
+    name: "phase_3b_breadth_and_memory",
+    up(db) {
+      const columns = db.prepare("PRAGMA table_info(articles)").all();
+      const hasSecondary = columns.some(
+        (column) => column.name === "domain_secondary_json",
+      );
+
+      if (!hasSecondary) {
+        db.exec(`ALTER TABLE articles ADD COLUMN domain_secondary_json TEXT;`);
+      }
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS cluster_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          cluster_id TEXT NOT NULL,
+          snapshot_at TEXT NOT NULL,
+          article_count INTEGER NOT NULL,
+          summary_json TEXT NOT NULL,
+          importance_score REAL,
+          primary_domain TEXT,
+          secondary_domains_json TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_cluster_history_cluster_id
+          ON cluster_history(cluster_id);
+        CREATE INDEX IF NOT EXISTS idx_cluster_history_snapshot_at
+          ON cluster_history(snapshot_at);
+
+        CREATE TABLE IF NOT EXISTS narrative_threads (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          started_at TEXT NOT NULL,
+          last_updated_at TEXT NOT NULL,
+          summary_json TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS narrative_thread_clusters (
+          thread_id TEXT NOT NULL,
+          cluster_id TEXT NOT NULL,
+          added_at TEXT NOT NULL,
+          PRIMARY KEY (thread_id, cluster_id),
+          FOREIGN KEY (thread_id) REFERENCES narrative_threads(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_narrative_thread_clusters_cluster_id
+          ON narrative_thread_clusters(cluster_id);
+
+        CREATE TABLE IF NOT EXISTS cluster_view_state (
+          cluster_id TEXT PRIMARY KEY,
+          last_viewed_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS domain_view_state (
+          domain TEXT PRIMARY KEY,
+          last_viewed_at TEXT NOT NULL,
+          collapsed INTEGER NOT NULL DEFAULT 0
+        );
+      `);
+
+      const remap = {
+        Chips: "Semis",
+        Infra: "Cloud",
+        Energy: "Climate",
+        Macro: "Policy",
+        Frontier: "General",
+      };
+
+      const update = db.prepare(
+        "UPDATE articles SET domain = ? WHERE domain = ?",
+      );
+      for (const [legacy, replacement] of Object.entries(remap)) {
+        update.run(replacement, legacy);
+      }
+    },
+  },
 ];
 
 function ensureSchemaVersionTable(db) {

@@ -8,11 +8,19 @@ function impactedDomains(scenario: Scenario): Array<ArticleDomain | "Cross-domai
   const text = textForScenario(scenario);
   const domains: Array<ArticleDomain | "Cross-domain"> = [];
 
-  if (/(ai|model|inference|agent|openai|frontier)/.test(text)) domains.push("AI");
-  if (/(chip|gpu|semiconductor|nvidia|tsmc|memory)/.test(text)) domains.push("Chips");
-  if (/(data center|infrastructure|cloud|power|grid|energy)/.test(text)) domains.push("Infra");
-  if (/(energy|power|grid|electricity)/.test(text)) domains.push("Energy");
-  if (/(policy|rate|macro|market|capital)/.test(text)) domains.push("Macro");
+  if (/(ai|model|inference|agent|openai|frontier|llm)/.test(text)) domains.push("AI");
+  if (/(chip|gpu|semiconductor|nvidia|tsmc|memory|fab)/.test(text)) domains.push("Semis");
+  if (/(data center|hyperscaler|cloud|aws|azure|gcp)/.test(text)) domains.push("Cloud");
+  if (/(security|cyber|breach|ransomware|cve)/.test(text)) domains.push("Security");
+  if (/(consumer|iphone|smartphone|retail)/.test(text)) domains.push("Consumer");
+  if (/(bio|pharma|clinical|genome|biotech)/.test(text)) domains.push("Bio");
+  if (/(climate|energy|grid|power|renewable|emissions)/.test(text)) domains.push("Climate");
+  if (/(crypto|bitcoin|ethereum|blockchain|defi|token)/.test(text)) domains.push("Crypto");
+  if (/(policy|regulation|antitrust|rate|macro|capital|tariff)/.test(text)) domains.push("Policy");
+  if (/(space|satellite|rocket|launch|orbit)/.test(text)) domains.push("Space");
+  if (/(robot|autonomy|drone)/.test(text)) domains.push("Robotics");
+  if (/(battery|batteries|lithium|solid-state)/.test(text)) domains.push("Batteries");
+  if (/(ar\b|vr\b|xr\b|vision pro|headset|mixed reality)/.test(text)) domains.push("AR");
 
   return domains.length ? domains : ["Cross-domain"];
 }

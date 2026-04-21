@@ -33,13 +33,19 @@ const timeRanges: Array<{ label: string; value: "today" | "week" | "month" }> = 
 const domains: Array<"All" | ArticleDomain> = [
   "All",
   "AI",
-  "Chips",
-  "Infra",
+  "Semis",
+  "Cloud",
+  "Security",
+  "Consumer",
   "Bio",
-  "Energy",
-  "Macro",
+  "Climate",
+  "Crypto",
+  "Policy",
+  "Space",
+  "Robotics",
+  "Batteries",
+  "AR",
   "General",
-  "Frontier",
 ];
 
 export function FiltersBar({

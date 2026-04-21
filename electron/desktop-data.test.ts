@@ -95,8 +95,114 @@ describe("Electron Phase 2 local data layer", () => {
     const version = db.prepare("SELECT max(version) AS version FROM schema_version").get();
     const articles = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'articles'").get();
 
-    expect(version.version).toBe(3);
+    expect(version.version).toBe(4);
     expect(articles.name).toBe("articles");
+  });
+
+  it("migration v4 adds domain_secondary_json and breadth/memory tables", () => {
+    const db = createDb();
+
+    const articleColumns = db.prepare("PRAGMA table_info(articles)").all();
+    expect(articleColumns.some((c: any) => c.name === "domain_secondary_json")).toBe(true);
+
+    const newTables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all()
+      .map((row: any) => row.name);
+    expect(newTables).toEqual(
+      expect.arrayContaining([
+        "cluster_history",
+        "narrative_threads",
+        "narrative_thread_clusters",
+        "cluster_view_state",
+        "domain_view_state",
+      ]),
+    );
+  });
+
+  it("migration v4 remaps legacy domain values on existing rows", () => {
+    const db = new Database(":memory:");
+    db.pragma("foreign_keys = ON");
+    dbs.push(db);
+
+    const { migrations } = require("./migrations");
+    const apply = (n: number) => {
+      migrations[n - 1].up(db);
+      db.prepare(
+        "INSERT INTO schema_version (version, name, applied_at) VALUES (?, ?, ?)",
+      ).run(migrations[n - 1].version, migrations[n - 1].name, new Date().toISOString());
+    };
+    db.exec(
+      `CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);`,
+    );
+    apply(1);
+    apply(2);
+    apply(3);
+
+    db.prepare(
+      `INSERT INTO articles (id, headline, domain, published_at, processed_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run("legacy-1", "Old Chips Story", "Chips", "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z");
+
+    apply(4);
+
+    const row: any = db.prepare("SELECT domain FROM articles WHERE id = ?").get("legacy-1");
+    expect(row.domain).toBe("Semis");
+  });
+
+  it("normalizes legacy domain input and round-trips secondary domains", () => {
+    const db = createDb();
+
+    upsertArticles(db, [
+      sampleArticle({
+        id: "legacy-domain",
+        domain: "Chips",
+        domainSecondary: ["AI", "Policy", "Policy", "AI"],
+      }),
+      sampleArticle({
+        id: "clean-domain",
+        url: "https://example.com/clean",
+        domain: "Climate",
+        domainSecondary: ["Batteries"],
+      }),
+    ]);
+
+    const rows = getArticles(db, { limit: 10 });
+    const legacy = rows.find((r: any) => r.id === "legacy-domain");
+    const clean = rows.find((r: any) => r.id === "clean-domain");
+
+    expect(legacy.domain).toBe("Semis");
+    expect(legacy.domainSecondary).toEqual(["AI", "Policy"]);
+    expect(clean.domain).toBe("Climate");
+    expect(clean.domainSecondary).toEqual(["Batteries"]);
+  });
+
+  it("rejects unknown primary domain and drops secondary duplicates of primary", () => {
+    const db = createDb();
+
+    upsertArticles(db, [
+      sampleArticle({
+        id: "unknown-domain",
+        url: "https://example.com/unknown",
+        domain: "NotADomain",
+        domainSecondary: ["AI", "NotADomain", "AI"],
+      }),
+      sampleArticle({
+        id: "self-secondary",
+        url: "https://example.com/self",
+        domain: "AI",
+        domainSecondary: ["AI", "Semis"],
+      }),
+    ]);
+
+    const rows = getArticles(db, { limit: 10 });
+    const unknown = rows.find((r: any) => r.id === "unknown-domain");
+    const self = rows.find((r: any) => r.id === "self-secondary");
+
+    expect(unknown.domain).toBe("General");
+    expect(unknown.domainSecondary).toEqual(["AI"]);
+    expect(self.domain).toBe("AI");
+    expect(self.domainSecondary).toEqual(["Semis"]);
   });
 
   it("dedupes articles by URL and preserves tag joins", () => {

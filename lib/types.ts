@@ -1,12 +1,51 @@
 export type ArticleDomain =
   | "AI"
-  | "Chips"
-  | "Infra"
+  | "Semis"
+  | "Cloud"
+  | "Security"
+  | "Consumer"
   | "Bio"
-  | "Energy"
-  | "Macro"
-  | "General"
-  | "Frontier";
+  | "Climate"
+  | "Crypto"
+  | "Policy"
+  | "Space"
+  | "Robotics"
+  | "Batteries"
+  | "AR"
+  | "General";
+
+export const ARTICLE_DOMAINS: readonly ArticleDomain[] = [
+  "AI",
+  "Semis",
+  "Cloud",
+  "Security",
+  "Consumer",
+  "Bio",
+  "Climate",
+  "Crypto",
+  "Policy",
+  "Space",
+  "Robotics",
+  "Batteries",
+  "AR",
+  "General",
+] as const;
+
+export const LEGACY_DOMAIN_REMAP: Record<string, ArticleDomain> = {
+  Chips: "Semis",
+  Infra: "Cloud",
+  Energy: "Climate",
+  Macro: "Policy",
+  Frontier: "General",
+};
+
+export function normalizeArticleDomain(value: unknown): ArticleDomain {
+  if (typeof value !== "string") return "General";
+  if ((ARTICLE_DOMAINS as readonly string[]).includes(value)) {
+    return value as ArticleDomain;
+  }
+  return LEGACY_DOMAIN_REMAP[value] ?? "General";
+}
 
 export type Article = {
   id: string;
@@ -14,6 +53,7 @@ export type Article = {
   processed_at: string;
   week: string;
   domain: ArticleDomain;
+  domainSecondary?: ArticleDomain[];
   headline: string;
   summary: string;
   source?: string;
@@ -36,6 +76,7 @@ export type StoryCluster = {
   summary: string;
   whyItMatters: string[];
   domain: ArticleDomain;
+  domainSecondary?: ArticleDomain[];
   tags: string[];
   entities: ExtractedEntity[];
   articleIds: string[];

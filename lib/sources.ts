@@ -15,7 +15,7 @@ export const sources: RssSource[] = [
   {
     name: "Wired",
     url: "https://www.wired.com/feed/rss",
-    category: "Macro",
+    category: "General",
   },
   {
     name: "Slashdot",
@@ -40,37 +40,37 @@ export const sources: RssSource[] = [
   {
     name: "Semiconductor Engineering",
     url: "https://semiengineering.com/feed/",
-    category: "Chips",
+    category: "Semis",
   },
   {
     name: "AnandTech",
     url: "https://www.anandtech.com/rss/",
-    category: "Chips",
+    category: "Semis",
   },
   {
     name: "Data Center Knowledge",
     url: "https://www.datacenterknowledge.com/rss.xml",
-    category: "Infra",
+    category: "Cloud",
   },
   {
     name: "TechCrunch",
     url: "https://techcrunch.com/feed/",
-    category: "Macro",
+    category: "General",
   },
   {
     name: "The Verge",
     url: "https://www.theverge.com/rss/index.xml",
-    category: "Macro",
+    category: "Consumer",
   },
   {
     name: "Techmeme",
     url: "https://www.techmeme.com/feed.xml",
-    category: "Macro",
+    category: "General",
   },
   {
     name: "Reuters Tech",
     url: "https://www.reutersagency.com/feed/?best-topics=technology",
-    category: "Macro",
+    category: "General",
   },
   {
     name: "Nature Biotechnology",
@@ -80,6 +80,6 @@ export const sources: RssSource[] = [
   {
     name: "Science Daily Tech",
     url: "https://www.sciencedaily.com/rss/computers_math/technology.xml",
-    category: "Frontier",
+    category: "General",
   },
 ];

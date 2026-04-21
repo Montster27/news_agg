@@ -93,7 +93,7 @@ describe("importance feedback", () => {
     const articles = [
       article({ id: "a1", domain: "AI" }),
       article({ id: "a2", domain: "AI", importance: 2 }),
-      article({ id: "a3", domain: "Macro", tags: ["consumer_gadgets"] }),
+      article({ id: "a3", domain: "Policy", tags: ["consumer_gadgets"] }),
     ];
     const feedback: Record<string, ImportanceFeedback> = {
       a1: {
@@ -121,7 +121,7 @@ describe("importance feedback", () => {
     expect(learning.sampleCount).toBe(3);
     expect(getLearnedAdjustment(article({ id: "future" }), learning)).toBeGreaterThan(0);
     expect(
-      getLearnedAdjustment(article({ id: "future2", domain: "Macro", tags: ["consumer_gadgets"] }), learning),
+      getLearnedAdjustment(article({ id: "future2", domain: "Policy", tags: ["consumer_gadgets"] }), learning),
     ).toBeLessThan(0);
   });
 

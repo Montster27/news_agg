@@ -210,6 +210,7 @@ export function DesktopControls({
         ? `Indexed ${result.count ?? stats?.indexedCount ?? 0} articles`
         : result?.error ?? "Index rebuild failed",
     );
+    onRefreshComplete?.();
   };
 
   const resourceSummary = lastRefreshResult

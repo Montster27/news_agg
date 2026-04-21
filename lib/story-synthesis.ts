@@ -1,10 +1,10 @@
 import "server-only";
 
-import { AI_INSIGHT_MODEL, getOpenAIClient } from "@/lib/ai-client";
+import { AI_INSIGHT_MODEL, getAIClient } from "@/lib/ai-client";
 import { fallbackWhyItMatters } from "@/lib/clustering";
 import type { Article, StoryCluster } from "@/lib/types";
 
-const client = getOpenAIClient();
+const client = getAIClient();
 
 function normalizeBullets(value: string) {
   return value
@@ -44,13 +44,15 @@ export async function generateWhyItMatters(
         source: article.source,
       }));
 
-    const response = await client.chat.completions.create({
+    const response = await client.chat({
       model: AI_INSIGHT_MODEL,
+      temperature: 0,
+      maxTokens: 240,
       messages: [
         {
           role: "system",
           content:
-            "You write concise technology intelligence. Return exactly three short bullets: strategic/business significance, technical significance, and what to watch next. Stay grounded in the supplied story cluster.",
+            "You write concise technology intelligence. Return exactly three short bullets, one per line, prefixed with '-': strategic/business significance, technical significance, and what to watch next. Stay grounded in the supplied story cluster.",
         },
         {
           role: "user",
@@ -65,13 +67,9 @@ export async function generateWhyItMatters(
           }),
         },
       ],
-      max_tokens: 240,
     });
 
-    return exactlyThreeBullets(
-      normalizeBullets(response.choices[0]?.message.content ?? ""),
-      fallback,
-    );
+    return exactlyThreeBullets(normalizeBullets(response.content), fallback);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown synthesis error";
     console.warn(`[cluster] generateWhyItMatters failed: ${message}`);

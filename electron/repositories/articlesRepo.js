@@ -1,6 +1,52 @@
 const MAX_LIMIT = 1000;
 const { indexArticle } = require("./searchRepo");
 
+const ARTICLE_DOMAINS = [
+  "AI",
+  "Semis",
+  "Cloud",
+  "Security",
+  "Consumer",
+  "Bio",
+  "Climate",
+  "Crypto",
+  "Policy",
+  "Space",
+  "Robotics",
+  "Batteries",
+  "AR",
+  "General",
+];
+
+const LEGACY_DOMAIN_REMAP = {
+  Chips: "Semis",
+  Infra: "Cloud",
+  Energy: "Climate",
+  Macro: "Policy",
+  Frontier: "General",
+};
+
+function normalizeDomainValue(value) {
+  if (typeof value !== "string") return "General";
+  if (ARTICLE_DOMAINS.includes(value)) return value;
+  return LEGACY_DOMAIN_REMAP[value] ?? "General";
+}
+
+function normalizeSecondaryDomains(primary, raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set([primary]);
+  const out = [];
+  for (const entry of raw) {
+    const normalized = normalizeDomainValue(entry);
+    if (normalized === "General") continue;
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+    if (out.length >= 2) break;
+  }
+  return out;
+}
+
 function isImportance(value) {
   return [1, 2, 3, 4, 5].includes(Number(value));
 }
@@ -44,11 +90,25 @@ function normalizeArticle(article) {
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/^-|-$/g, "");
 
+  const primaryDomain = normalizeDomainValue(article.domain);
+  const secondaryInput =
+    article.domainSecondary ?? article.domain_secondary ?? article.domain_secondary_json;
+  let secondaryArray = secondaryInput;
+  if (typeof secondaryInput === "string" && secondaryInput.trim()) {
+    try {
+      secondaryArray = JSON.parse(secondaryInput);
+    } catch {
+      secondaryArray = [];
+    }
+  }
+  const domainSecondary = normalizeSecondaryDomains(primaryDomain, secondaryArray);
+
   return {
     id,
     headline: String(article.headline ?? "").trim(),
     summary: typeof article.summary === "string" ? article.summary : null,
-    domain: typeof article.domain === "string" ? article.domain : "General",
+    domain: primaryDomain,
+    domainSecondary,
     source: typeof article.source === "string" ? article.source : null,
     url: typeof article.url === "string" && article.url.trim() ? article.url.trim() : null,
     importance: isImportance(article.importance) ? Number(article.importance) : 3,
@@ -79,12 +139,24 @@ function getOrCreateTag(db, name, category = null) {
 }
 
 function articleFromRow(row, tags) {
+  const primaryDomain = normalizeDomainValue(row.domain);
+  let secondaryParsed = [];
+  if (typeof row.domain_secondary_json === "string" && row.domain_secondary_json.trim()) {
+    try {
+      secondaryParsed = JSON.parse(row.domain_secondary_json);
+    } catch {
+      secondaryParsed = [];
+    }
+  }
+  const domainSecondary = normalizeSecondaryDomains(primaryDomain, secondaryParsed);
+
   return {
     id: row.id,
     date: row.published_at ? row.published_at.slice(0, 10) : "",
     processed_at: row.processed_at ?? "",
     week: row.week ?? "",
-    domain: row.domain ?? "General",
+    domain: primaryDomain,
+    domainSecondary,
     headline: row.headline,
     summary: row.summary ?? "",
     source: row.source ?? undefined,
@@ -135,16 +207,21 @@ function upsertArticle(db, input) {
   const articleId = existing?.id ?? article.id;
   const inserted = !existing;
 
+  const domainSecondaryJson = article.domainSecondary.length
+    ? JSON.stringify(article.domainSecondary)
+    : null;
+
   db.prepare(`
     INSERT INTO articles (
-      id, headline, summary, domain, source, url, importance, personalized_score,
-      published_at, processed_at, raw_payload
+      id, headline, summary, domain, domain_secondary_json, source, url,
+      importance, personalized_score, published_at, processed_at, raw_payload
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       headline = excluded.headline,
       summary = excluded.summary,
       domain = excluded.domain,
+      domain_secondary_json = excluded.domain_secondary_json,
       source = excluded.source,
       url = COALESCE(excluded.url, articles.url),
       importance = excluded.importance,
@@ -157,6 +234,7 @@ function upsertArticle(db, input) {
     article.headline,
     article.summary,
     article.domain,
+    domainSecondaryJson,
     article.source,
     article.url,
     article.importance,

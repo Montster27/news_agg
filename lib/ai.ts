@@ -1,26 +1,24 @@
 import "server-only";
 
-import { AI_ARTICLE_MODEL, getOpenAIClient } from "@/lib/ai-client";
-import { Article, ArticleDomain } from "@/lib/types";
+import { AI_ARTICLE_MODEL, getAIClient } from "@/lib/ai-client";
+import {
+  ARTICLE_DOMAINS,
+  normalizeArticleDomain,
+  type Article,
+  type ArticleDomain,
+} from "@/lib/types";
 
 const ONE_HOUR = 60 * 60 * 1000;
 const AI_FAILURE_COOLDOWN = 15 * 60 * 1000;
 const MAX_PROCESSED_CACHE_ENTRIES = 300;
 const GENERIC_TAGS = new Set(["ai", "technology", "startup", "news", "tech"]);
-const VALID_DOMAINS: ArticleDomain[] = [
-  "AI",
-  "Chips",
-  "Infra",
-  "Bio",
-  "Energy",
-  "Macro",
-];
 
 type ArticleInput = Pick<Article, "id" | "headline" | "summary" | "source">;
 
 type ProcessedArticle = {
   clean_summary: string;
-  domain: Extract<ArticleDomain, "AI" | "Chips" | "Infra" | "Bio" | "Energy" | "Macro">;
+  domain: ArticleDomain;
+  secondary: ArticleDomain[];
   tags: string[];
   importance: 1 | 2 | 3 | 4 | 5;
 };
@@ -33,56 +31,35 @@ type CacheEntry = {
 const processedCache = new Map<string, CacheEntry>();
 let aiDisabledUntil = 0;
 
-const client = getOpenAIClient();
+const client = getAIClient();
 
 const systemPrompt = `You are a technology analyst.
 
 Your job:
-- summarize tech news clearly
-- classify into domains
-- assign tags that reflect underlying trends
+- summarize tech news clearly in two sentences
+- classify each article into one PRIMARY tech domain from this fixed list:
+  AI, Semis, Cloud, Security, Consumer, Bio, Climate, Crypto, Policy, Space, Robotics, Batteries, AR, General
+- optionally add up to TWO SECONDARY domains from the same list (distinct from the primary; omit if none fit)
+- assign 1-4 tags that reflect underlying trends (lowercase, short)
+- assign importance 1-5 (5 = landmark, 1 = trivial)
 
-Be precise and consistent.`;
+Return strict JSON only, no prose. Use domain names exactly as listed above.`;
 
-const responseSchema = {
-  type: "object",
-  properties: {
-    articles: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: {
-            type: "string",
-          },
-          summary: {
-            type: "string",
-            description: "A clear two-sentence summary.",
-          },
-          domain: {
-            type: "string",
-            enum: VALID_DOMAINS,
-          },
-          tags: {
-            type: "array",
-            items: { type: "string" },
-            minItems: 1,
-            maxItems: 4,
-          },
-          importance: {
-            type: "integer",
-            minimum: 1,
-            maximum: 5,
-          },
-        },
-        required: ["id", "summary", "domain", "tags", "importance"],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ["articles"],
-  additionalProperties: false,
-} as const;
+function buildPromptSchemaHint() {
+  return `Respond with JSON of this shape:
+{
+  "articles": [
+    {
+      "id": "string (matches input id)",
+      "summary": "two-sentence summary",
+      "domain": "one of ${ARTICLE_DOMAINS.join(", ")}",
+      "secondary": ["up to 2 more from the same list, or empty array"],
+      "tags": ["1 to 4 short lowercase tags"],
+      "importance": 1
+    }
+  ]
+}`;
+}
 
 function cacheKey(article: ArticleInput) {
   return `${article.source ?? "unknown"}::${article.headline}`.toLowerCase();
@@ -147,13 +124,50 @@ function normalizeTags(tags: string[]) {
   return normalized.length ? normalized : ["uncategorized"];
 }
 
+function normalizeSecondary(
+  primary: ArticleDomain,
+  raw: unknown,
+): ArticleDomain[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<ArticleDomain>([primary]);
+  const out: ArticleDomain[] = [];
+  for (const entry of raw) {
+    const normalized = normalizeArticleDomain(entry);
+    if (normalized === "General") continue;
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+    if (out.length >= 2) break;
+  }
+  return out;
+}
+
 function fallbackArticle(article: ArticleInput): ProcessedArticle {
   return {
-    clean_summary: sentenceClamp(article.summary),
-    domain: "Macro",
+    clean_summary: sentenceClamp(article.summary ?? ""),
+    domain: "General",
+    secondary: [],
     tags: ["uncategorized"],
     importance: 3,
   };
+}
+
+function extractJson(content: string): unknown {
+  const trimmed = content.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    const first = trimmed.indexOf("{");
+    const last = trimmed.lastIndexOf("}");
+    if (first >= 0 && last > first) {
+      try {
+        return JSON.parse(trimmed.slice(first, last + 1));
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
 }
 
 export async function processArticle(article: ArticleInput): Promise<ProcessedArticle> {
@@ -170,20 +184,20 @@ export async function processArticle(article: ArticleInput): Promise<ProcessedAr
     date: new Date().toISOString(),
     processed_at: new Date().toISOString(),
     week: "now",
-    domain: "Macro" as ArticleDomain,
+    domain: "General" as ArticleDomain,
     tags: [],
     importance: 3,
   } as Article;
 
   const results = await processArticlesInBatches([dummyArticle]);
-  const processedResult: ProcessedArticle = {
-    clean_summary: results[0].summary,
-    domain: results[0].domain as Extract<ArticleDomain, "AI" | "Chips" | "Infra" | "Bio" | "Energy" | "Macro">,
-    tags: results[0].tags,
-    importance: results[0].importance as 1 | 2 | 3 | 4 | 5,
+  const first = results[0];
+  return {
+    clean_summary: first.summary,
+    domain: first.domain,
+    secondary: first.domainSecondary ?? [],
+    tags: first.tags,
+    importance: first.importance,
   };
-
-  return processedResult;
 }
 
 export async function processArticlesInBatches(articles: Article[]) {
@@ -192,7 +206,7 @@ export async function processArticlesInBatches(articles: Article[]) {
 
   for (let index = 0; index < processed.length; index += 6) {
     const slice = processed.slice(index, index + 6);
-    
+
     const uncached = slice.filter((article) => {
       const key = cacheKey(article);
       const cached = processedCache.get(key);
@@ -213,40 +227,35 @@ export async function processArticlesInBatches(articles: Article[]) {
               headline: a.headline,
               summary: a.summary,
               source: a.source ?? "Unknown",
-            }))
+            })),
           );
 
-          const response = await client.chat.completions.create({
+          const response = await client.chat({
             model: AI_ARTICLE_MODEL,
+            format: "json",
+            temperature: 0,
+            maxTokens: 1500,
             messages: [
               { role: "system", content: systemPrompt },
               {
                 role: "user",
-                content: `Articles to analyze:\n${promptInput}\n\nReturn JSON only.`,
+                content: `${buildPromptSchemaHint()}\n\nArticles to analyze:\n${promptInput}`,
               },
             ],
-            response_format: {
-              type: "json_schema",
-              json_schema: {
-                name: "article_intelligence",
-                strict: true,
-                schema: responseSchema,
-              },
-            },
-            max_tokens: 1500,
           });
 
-          const parsed = JSON.parse(response.choices[0].message.content || "{}") as {
+          const parsed = extractJson(response.content) as {
             articles?: Array<{
-              id: string;
+              id?: string;
               summary?: string;
               domain?: string;
+              secondary?: unknown;
               tags?: string[];
               importance?: number;
             }>;
-          };
+          } | null;
 
-          const aiResults = parsed.articles || [];
+          const aiResults = parsed?.articles ?? [];
           const aiByIndex = new Map<string, (typeof aiResults)[number]>();
           for (const item of aiResults) {
             if (item && typeof item.id === "string") {
@@ -262,17 +271,17 @@ export async function processArticlesInBatches(articles: Article[]) {
             let processedArticle: ProcessedArticle;
 
             if (aiItem) {
+              const primary = normalizeArticleDomain(aiItem.domain);
               processedArticle = {
                 clean_summary: sentenceClamp(aiItem.summary ?? article.summary),
-                domain: VALID_DOMAINS.includes((aiItem.domain ?? "Macro") as ArticleDomain)
-                  ? (aiItem.domain as ProcessedArticle["domain"])
-                  : "Macro",
+                domain: primary,
+                secondary: normalizeSecondary(primary, aiItem.secondary),
                 tags: normalizeTags(Array.isArray(aiItem.tags) ? aiItem.tags : []),
                 importance:
                   typeof aiItem.importance === "number" &&
                   aiItem.importance >= 1 &&
                   aiItem.importance <= 5
-                    ? (aiItem.importance as ProcessedArticle["importance"])
+                    ? (Math.round(aiItem.importance) as ProcessedArticle["importance"])
                     : 3,
               };
             } else {
@@ -310,6 +319,7 @@ export async function processArticlesInBatches(articles: Article[]) {
         ...article,
         summary: cached.clean_summary,
         domain: cached.domain,
+        domainSecondary: cached.secondary,
         tags: cached.tags,
         importance: cached.importance,
       };

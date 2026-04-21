@@ -52,7 +52,7 @@ describe("story clustering", () => {
         url: "https://source-c.test/battery",
         headline: "Battery startup opens pilot factory for grid storage",
         summary: "A battery company is opening a new pilot facility.",
-        domain: "Energy",
+        domain: "Climate",
         tags: ["battery", "grid"],
         importance: 3,
       }),
