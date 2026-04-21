@@ -5,8 +5,11 @@ import {
   getAffinities,
   getRules,
   saveConnections,
+  saveImplications,
   saveNarratives,
+  saveScenarios,
   saveTrends,
+  saveWatchItems,
 } from "@/lib/db";
 import { ingestFeeds } from "@/lib/ingest";
 import { generateInsightReport, generateNarrativeInsights } from "@/lib/insights";
@@ -15,6 +18,9 @@ import { fallbackArticles } from "@/lib/data";
 import { defaultUserProfile, personalizeStoryCluster } from "@/lib/user";
 import { buildNarrativeThreads } from "@/lib/narratives";
 import { computeConnections } from "@/lib/connections";
+import { generateScenarios } from "@/lib/scenarios";
+import { generateImplications } from "@/lib/implications";
+import { generateWatchItems } from "@/lib/watch";
 import type { WeeklyBrief } from "@/lib/brief";
 import type { InsightEngineResult } from "@/lib/insights";
 import type { LongTermTrendAnalysis } from "@/lib/db";
@@ -76,6 +82,9 @@ function desktopBootstrapData() {
     trendSignals: [],
     narratives: [],
     connections: [],
+    scenarios: [],
+    implications: [],
+    watchItems: [],
     brief,
     patterns,
     longTermTrends,
@@ -122,6 +131,18 @@ export default async function DashboardPage() {
     longTermTrends: longTermTrends.rising,
     narrativeInsights,
   });
+  const scenarios = generateScenarios({
+    trends: trendSignals,
+    narratives,
+    connections,
+  });
+  const implications = scenarios.map(generateImplications);
+  const watchItems = scenarios.map(generateWatchItems);
+  await Promise.all([
+    saveScenarios(scenarios),
+    saveImplications(implications),
+    saveWatchItems(watchItems),
+  ]);
 
   return (
     <CommandCenterClient
@@ -132,6 +153,9 @@ export default async function DashboardPage() {
       trendSignals={trendSignals}
       narratives={narratives}
       connections={connections}
+      scenarios={scenarios}
+      implications={implications}
+      watchItems={watchItems}
       brief={brief}
       patterns={patterns}
       longTermTrends={longTermTrends}

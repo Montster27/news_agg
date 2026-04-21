@@ -287,4 +287,103 @@ describe("story cluster database helpers", () => {
     expect(trends[0]?.direction).toBe("up");
     expect(connections[0]?.weight).toBe(2.5);
   });
+
+  it("persists strategic intelligence outputs", async () => {
+    process.env.POSTGRES_URL = "postgres://local/test";
+    queryMock.mockImplementation((statement: string) => {
+      const sql = String(statement);
+
+      if (sql.includes("FROM scenarios")) {
+        return Promise.resolve({
+          rows: [
+            {
+              id: "scenario-ai-infra",
+              title: "AI infrastructure becomes a constraint",
+              description: "AI infrastructure is accelerating.",
+              drivers: ["ai infrastructure velocity 3"],
+              likelihood: "high",
+              time_horizon: "0-3 months",
+              created_at: "2026-04-21T12:00:00.000Z",
+            },
+          ],
+        });
+      }
+
+      if (sql.includes("FROM implications")) {
+        return Promise.resolve({
+          rows: [
+            {
+              scenario_id: "scenario-ai-infra",
+              consequences: ["Prioritize near-term review."],
+              domain_impacts: [{ domain: "AI", impact: "AI planning pressure." }],
+              created_at: "2026-04-21T12:00:00.000Z",
+            },
+          ],
+        });
+      }
+
+      if (sql.includes("FROM watch_items")) {
+        return Promise.resolve({
+          rows: [
+            {
+              scenario_id: "scenario-ai-infra",
+              signals: ["New clusters reinforcing the scenario."],
+              indicators: ["week-over-week trend velocity"],
+              created_at: "2026-04-21T12:00:00.000Z",
+            },
+          ],
+        });
+      }
+
+      return Promise.resolve({ rows: [] });
+    });
+
+    const {
+      getImplications,
+      getScenarios,
+      getWatchItems,
+      saveImplications,
+      saveScenarios,
+      saveWatchItems,
+    } = await import("./db");
+
+    await saveScenarios([
+      {
+        id: "scenario-ai-infra",
+        title: "AI infrastructure becomes a constraint",
+        description: "AI infrastructure is accelerating.",
+        drivers: ["ai infrastructure velocity 3"],
+        likelihood: "high",
+        timeHorizon: "0-3 months",
+      },
+    ]);
+    await saveImplications([
+      {
+        scenarioId: "scenario-ai-infra",
+        consequences: ["Prioritize near-term review."],
+        domainImpacts: [{ domain: "AI", impact: "AI planning pressure." }],
+      },
+    ]);
+    await saveWatchItems([
+      {
+        scenarioId: "scenario-ai-infra",
+        signals: ["New clusters reinforcing the scenario."],
+        indicators: ["week-over-week trend velocity"],
+      },
+    ]);
+
+    const [scenarios, implications, watchItems] = await Promise.all([
+      getScenarios(),
+      getImplications(),
+      getWatchItems(),
+    ]);
+    const sql = queryMock.mock.calls.map(([statement]) => String(statement)).join("\n");
+
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS scenarios");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS implications");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS watch_items");
+    expect(scenarios[0]?.likelihood).toBe("high");
+    expect(implications[0]?.domainImpacts[0]?.domain).toBe("AI");
+    expect(watchItems[0]?.indicators).toContain("week-over-week trend velocity");
+  });
 });

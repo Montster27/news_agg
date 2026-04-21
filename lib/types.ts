@@ -135,6 +135,32 @@ export type NarrativeInsightReport = {
   crossDomainInsights: string[];
 };
 
+export type ScenarioLikelihood = "low" | "medium" | "high";
+
+export type Scenario = {
+  id: string;
+  title: string;
+  description: string;
+  drivers: string[];
+  likelihood: ScenarioLikelihood;
+  timeHorizon: string;
+};
+
+export type ScenarioImplication = {
+  scenarioId: string;
+  consequences: string[];
+  domainImpacts: Array<{
+    domain: ArticleDomain | "Cross-domain";
+    impact: string;
+  }>;
+};
+
+export type WatchItem = {
+  scenarioId: string;
+  signals: string[];
+  indicators: string[];
+};
+
 export type ImportanceFeedback = {
   articleId: string;
   originalImportance: 1 | 2 | 3 | 4 | 5;

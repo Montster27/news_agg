@@ -10,11 +10,14 @@ import type {
   ExtractedEntity,
   NarrativeThread,
   PersonalizationRule,
+  Scenario,
+  ScenarioImplication,
   StoryCluster,
   TrendSignal,
   UserAffinity,
   UserAffinityType,
   UserFeedback,
+  WatchItem,
 } from "@/lib/types";
 
 const databaseUrl =
@@ -120,6 +123,30 @@ type StoredConnectionRow = {
   weight: number;
   cluster_ids: string[];
   computed_at: string;
+};
+
+type StoredScenarioRow = {
+  id: string;
+  title: string;
+  description: string;
+  drivers: string[];
+  likelihood: Scenario["likelihood"];
+  time_horizon: string;
+  created_at: string;
+};
+
+type StoredImplicationRow = {
+  scenario_id: string;
+  consequences: string[];
+  domain_impacts: ScenarioImplication["domainImpacts"];
+  created_at: string;
+};
+
+type StoredWatchItemRow = {
+  scenario_id: string;
+  signals: string[];
+  indicators: string[];
+  created_at: string;
 };
 
 export type StoredInsight = {
@@ -314,6 +341,38 @@ export async function initDb() {
     `);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS scenarios (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        drivers JSONB NOT NULL,
+        likelihood TEXT NOT NULL,
+        time_horizon TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS implications (
+        scenario_id TEXT PRIMARY KEY,
+        consequences JSONB NOT NULL,
+        domain_impacts JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL,
+        FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS watch_items (
+        scenario_id TEXT PRIMARY KEY,
+        signals JSONB NOT NULL,
+        indicators JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL,
+        FOREIGN KEY (scenario_id) REFERENCES scenarios(id) ON DELETE CASCADE
+      );
+    `);
+
+    await pool.query(`
       CREATE INDEX IF NOT EXISTS articles_published_at_idx
       ON articles (published_at DESC);
     `);
@@ -376,6 +435,16 @@ export async function initDb() {
     await pool.query(`
       CREATE INDEX IF NOT EXISTS connections_weight_idx
       ON connections (weight DESC);
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS scenarios_likelihood_idx
+      ON scenarios (likelihood);
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS scenarios_created_at_idx
+      ON scenarios (created_at DESC);
     `);
 
     initialized = true;
@@ -654,6 +723,33 @@ function connectionFromRow(row: StoredConnectionRow): ConnectionStrength {
     targetType: row.target_type,
     weight: Number(row.weight),
     clusterIds: row.cluster_ids ?? [],
+  };
+}
+
+function scenarioFromRow(row: StoredScenarioRow): Scenario {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    drivers: row.drivers ?? [],
+    likelihood: row.likelihood,
+    timeHorizon: row.time_horizon,
+  };
+}
+
+function implicationFromRow(row: StoredImplicationRow): ScenarioImplication {
+  return {
+    scenarioId: row.scenario_id,
+    consequences: row.consequences ?? [],
+    domainImpacts: row.domain_impacts ?? [],
+  };
+}
+
+function watchItemFromRow(row: StoredWatchItemRow): WatchItem {
+  return {
+    scenarioId: row.scenario_id,
+    signals: row.signals ?? [],
+    indicators: row.indicators ?? [],
   };
 }
 
@@ -959,6 +1055,177 @@ export async function getConnections(limit = 15) {
   );
 
   return result.rows.map(connectionFromRow);
+}
+
+export async function saveScenarios(scenarios: Scenario[]) {
+  if (!pool || !scenarios.length) {
+    return;
+  }
+
+  await initDb();
+  const createdAt = new Date().toISOString();
+
+  for (const scenario of scenarios) {
+    await pool.query(
+      `
+        INSERT INTO scenarios (
+          id,
+          title,
+          description,
+          drivers,
+          likelihood,
+          time_horizon,
+          created_at
+        )
+        VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7)
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          drivers = EXCLUDED.drivers,
+          likelihood = EXCLUDED.likelihood,
+          time_horizon = EXCLUDED.time_horizon,
+          created_at = EXCLUDED.created_at
+      `,
+      [
+        scenario.id,
+        scenario.title,
+        scenario.description,
+        JSON.stringify(scenario.drivers),
+        scenario.likelihood,
+        scenario.timeHorizon,
+        createdAt,
+      ],
+    );
+  }
+}
+
+export async function getScenarios(limit = 10) {
+  if (!pool) {
+    return [];
+  }
+
+  await initDb();
+  const result = await pool.query<StoredScenarioRow>(
+    `
+      SELECT *
+      FROM scenarios
+      ORDER BY
+        CASE likelihood
+          WHEN 'high' THEN 3
+          WHEN 'medium' THEN 2
+          ELSE 1
+        END DESC,
+        created_at DESC
+      LIMIT $1
+    `,
+    [limit],
+  );
+
+  return result.rows.map(scenarioFromRow);
+}
+
+export async function saveImplications(implications: ScenarioImplication[]) {
+  if (!pool || !implications.length) {
+    return;
+  }
+
+  await initDb();
+  const createdAt = new Date().toISOString();
+
+  for (const implication of implications) {
+    await pool.query(
+      `
+        INSERT INTO implications (
+          scenario_id,
+          consequences,
+          domain_impacts,
+          created_at
+        )
+        VALUES ($1,$2::jsonb,$3::jsonb,$4)
+        ON CONFLICT (scenario_id) DO UPDATE SET
+          consequences = EXCLUDED.consequences,
+          domain_impacts = EXCLUDED.domain_impacts,
+          created_at = EXCLUDED.created_at
+      `,
+      [
+        implication.scenarioId,
+        JSON.stringify(implication.consequences),
+        JSON.stringify(implication.domainImpacts),
+        createdAt,
+      ],
+    );
+  }
+}
+
+export async function getImplications(limit = 10) {
+  if (!pool) {
+    return [];
+  }
+
+  await initDb();
+  const result = await pool.query<StoredImplicationRow>(
+    `
+      SELECT *
+      FROM implications
+      ORDER BY created_at DESC
+      LIMIT $1
+    `,
+    [limit],
+  );
+
+  return result.rows.map(implicationFromRow);
+}
+
+export async function saveWatchItems(watchItems: WatchItem[]) {
+  if (!pool || !watchItems.length) {
+    return;
+  }
+
+  await initDb();
+  const createdAt = new Date().toISOString();
+
+  for (const item of watchItems) {
+    await pool.query(
+      `
+        INSERT INTO watch_items (
+          scenario_id,
+          signals,
+          indicators,
+          created_at
+        )
+        VALUES ($1,$2::jsonb,$3::jsonb,$4)
+        ON CONFLICT (scenario_id) DO UPDATE SET
+          signals = EXCLUDED.signals,
+          indicators = EXCLUDED.indicators,
+          created_at = EXCLUDED.created_at
+      `,
+      [
+        item.scenarioId,
+        JSON.stringify(item.signals),
+        JSON.stringify(item.indicators),
+        createdAt,
+      ],
+    );
+  }
+}
+
+export async function getWatchItems(limit = 10) {
+  if (!pool) {
+    return [];
+  }
+
+  await initDb();
+  const result = await pool.query<StoredWatchItemRow>(
+    `
+      SELECT *
+      FROM watch_items
+      ORDER BY created_at DESC
+      LIMIT $1
+    `,
+    [limit],
+  );
+
+  return result.rows.map(watchItemFromRow);
 }
 
 function rowsFromAnalysis(analysis: PatternAnalysis): StoredPatternRow[] {

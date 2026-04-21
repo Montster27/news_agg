@@ -23,6 +23,9 @@ import { TopSignals } from "@/components/TopSignals";
 import { extractEntities, mergeEntities } from "@/lib/entities";
 import { buildNarrativeThreads } from "@/lib/narratives";
 import { computeConnections } from "@/lib/connections";
+import { generateScenarios } from "@/lib/scenarios";
+import { generateImplications } from "@/lib/implications";
+import { generateWatchItems } from "@/lib/watch";
 import type {
   Article,
   ArticleDomain,
@@ -31,10 +34,13 @@ import type {
   NarrativeInsightReport,
   NarrativeThread,
   PersonalizationRule,
+  Scenario,
+  ScenarioImplication,
   StoryCluster,
   TrendSignal,
   UserAffinity,
   UserFeedbackAction,
+  WatchItem,
 } from "@/lib/types";
 import type { WeeklyBrief } from "@/lib/brief";
 import type { PatternAnalysis } from "@/lib/patterns";
@@ -89,6 +95,9 @@ type CommandCenterClientProps = {
   trendSignals?: TrendSignal[];
   narratives?: NarrativeThread[];
   connections?: ConnectionStrength[];
+  scenarios?: Scenario[];
+  implications?: ScenarioImplication[];
+  watchItems?: WatchItem[];
   brief: WeeklyBrief;
   patterns: PatternAnalysis;
   longTermTrends: LongTermTrendAnalysis;
@@ -295,6 +304,9 @@ export function CommandCenterClient({
   trendSignals: initialTrendSignals = [],
   narratives: initialNarratives = [],
   connections: initialConnections = [],
+  scenarios: initialScenarios = [],
+  implications: initialImplications = [],
+  watchItems: initialWatchItems = [],
   brief: initialBrief,
   patterns: initialPatterns,
   longTermTrends: initialLongTermTrends,
@@ -601,6 +613,25 @@ export function CommandCenterClient({
       .map((connection) => `${connection.source} is connected to ${connection.target}.`)
       .slice(0, 4),
   }), [connections, narrativeThreads, trendSignals]);
+  const scenarios = useMemo(
+    () => {
+      const generated = generateScenarios({
+        trends: trendSignals,
+        narratives: narrativeThreads,
+        connections,
+      });
+      return generated.length ? generated : initialScenarios;
+    },
+    [connections, initialScenarios, narrativeThreads, trendSignals],
+  );
+  const implications = useMemo(
+    () => initialImplications.length ? initialImplications : scenarios.map(generateImplications),
+    [initialImplications, scenarios],
+  );
+  const watchItems = useMemo(
+    () => initialWatchItems.length ? initialWatchItems : scenarios.map(generateWatchItems),
+    [initialWatchItems, scenarios],
+  );
   const visibleClusters = useMemo(
     () => sortedClusters.slice(0, VISIBLE_CLUSTER_LIMIT),
     [sortedClusters],
@@ -686,6 +717,9 @@ export function CommandCenterClient({
       trendSignals,
       narratives: narrativeThreads,
       connections,
+      scenarios,
+      implications,
+      watchItems,
       affinities,
       rules,
       feedback: feedbackMap,
@@ -697,15 +731,18 @@ export function CommandCenterClient({
       affinities,
       feedbackMap,
       connections,
+      implications,
       learningProfile,
       narrativeThreads,
       personalizedView,
       rules,
+      scenarios,
       scoreLookup,
       sortedArticles,
       sortedClusters,
       timeRange,
       trendSignals,
+      watchItems,
     ],
   );
 
@@ -855,6 +892,9 @@ export function CommandCenterClient({
       <KeyInsights
         insights={visibleInsights}
         narrativeInsights={insightReport.narrativeInsights ?? narrativeInsights}
+        scenarios={scenarios}
+        implications={implications}
+        watchItems={watchItems}
         activeTags={activeTags}
         onInsightClick={handleShiftClick}
       />
