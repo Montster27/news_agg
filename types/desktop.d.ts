@@ -83,6 +83,7 @@ declare global {
     minImportance?: number | null;
     personalizedOnly?: boolean;
     limit?: number;
+    recordRecent?: boolean;
   };
 
   type SearchResult = {

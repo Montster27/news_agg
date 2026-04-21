@@ -52,7 +52,7 @@ describe("story cluster database helpers", () => {
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS story_clusters");
     expect(sql).toContain("INSERT INTO story_clusters");
     expect(sql).toContain("INSERT INTO story_cluster_articles");
-    expect(params.some((values) => values?.[0] === "cluster-openai-infra")).toBe(true);
+    expect(params.some((values) => String(values?.[0]).includes("cluster-openai-infra"))).toBe(true);
   });
 
   it("loads latest clusters with article ids", async () => {
@@ -385,5 +385,157 @@ describe("story cluster database helpers", () => {
     expect(scenarios[0]?.likelihood).toBe("high");
     expect(implications[0]?.domainImpacts[0]?.domain).toBe("AI");
     expect(watchItems[0]?.indicators).toContain("week-over-week trend velocity");
+  });
+
+  it("persists generated outputs and templates", async () => {
+    process.env.POSTGRES_URL = "postgres://local/test";
+    const generatedAt = "2026-04-21T12:00:00.000Z";
+    queryMock.mockImplementation((statement: string) => {
+      const sql = String(statement);
+
+      if (sql.includes("FROM generated_outputs")) {
+        return Promise.resolve({
+          rows: [
+            {
+              id: "weekly-brief-executive-2026-04-21",
+              type: "weekly-brief",
+              audience: "executive",
+              title: "Weekly Intelligence Brief",
+              summary: "Decision lens: AI infrastructure is accelerating.",
+              sections: [
+                {
+                  id: "top-shifts",
+                  title: "Top Shifts",
+                  kind: "summary",
+                  bullets: ["Decision lens: AI infrastructure is accelerating."],
+                },
+              ],
+              metadata: {
+                generatedAt,
+                templateId: "weekly-brief",
+                templateVersion: 1,
+                tone: "decisive",
+                depth: "brief",
+                language: "business",
+                sourceCounts: {
+                  articles: 0,
+                  clusters: 1,
+                  trends: 1,
+                  narratives: 0,
+                  scenarios: 0,
+                },
+                audienceInstruction: "Prioritize decisions.",
+              },
+              content: {
+                id: "weekly-brief-executive-2026-04-21",
+                type: "weekly-brief",
+                audience: "executive",
+                title: "Weekly Intelligence Brief",
+                summary: "Decision lens: AI infrastructure is accelerating.",
+                sections: [],
+                metadata: {
+                  generatedAt,
+                  templateId: "weekly-brief",
+                  templateVersion: 1,
+                  tone: "decisive",
+                  depth: "brief",
+                  language: "business",
+                  sourceCounts: {
+                    articles: 0,
+                    clusters: 1,
+                    trends: 1,
+                    narratives: 0,
+                    scenarios: 0,
+                  },
+                  audienceInstruction: "Prioritize decisions.",
+                },
+              },
+              created_at: generatedAt,
+            },
+          ],
+        });
+      }
+
+      if (sql.includes("FROM templates")) {
+        return Promise.resolve({
+          rows: [
+            {
+              id: "weekly-brief",
+              label: "Weekly Brief",
+              description: "External weekly brief.",
+              version: 1,
+              default_audience: "executive",
+              sections: [
+                {
+                  id: "top-shifts",
+                  title: "Top Shifts",
+                  kind: "summary",
+                  prompt: "Lead with strongest changes.",
+                  defaultBulletLimit: 5,
+                },
+              ],
+              created_at: generatedAt,
+              updated_at: generatedAt,
+            },
+          ],
+        });
+      }
+
+      return Promise.resolve({ rows: [] });
+    });
+
+    const {
+      getGeneratedOutputs,
+      getTemplates,
+      saveGeneratedOutputToDb,
+      saveTemplateToDb,
+    } = await import("./db");
+    const { outputTemplates } = await import("./templates");
+
+    await saveGeneratedOutputToDb({
+      id: "weekly-brief-executive-2026-04-21",
+      type: "weekly-brief",
+      audience: "executive",
+      title: "Weekly Intelligence Brief",
+      summary: "Decision lens: AI infrastructure is accelerating.",
+      sections: [
+        {
+          id: "top-shifts",
+          title: "Top Shifts",
+          kind: "summary",
+          bullets: ["Decision lens: AI infrastructure is accelerating."],
+        },
+      ],
+      metadata: {
+        generatedAt,
+        templateId: "weekly-brief",
+        templateVersion: 1,
+        tone: "decisive",
+        depth: "brief",
+        language: "business",
+        sourceCounts: {
+          articles: 0,
+          clusters: 1,
+          trends: 1,
+          narratives: 0,
+          scenarios: 0,
+        },
+        audienceInstruction: "Prioritize decisions.",
+      },
+    });
+    await saveTemplateToDb(outputTemplates["weekly-brief"]);
+
+    const [outputs, templates] = await Promise.all([
+      getGeneratedOutputs({ type: "weekly-brief", audience: "executive" }),
+      getTemplates(),
+    ]);
+    const sql = queryMock.mock.calls.map(([statement]) => String(statement)).join("\n");
+
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS generated_outputs");
+    expect(sql).toContain("CREATE TABLE IF NOT EXISTS templates");
+    expect(sql).toContain("INSERT INTO generated_outputs");
+    expect(sql).toContain("INSERT INTO templates");
+    expect(outputs[0]?.metadata.tone).toBe("decisive");
+    expect(templates[0]?.defaultAudience).toBe("executive");
   });
 });

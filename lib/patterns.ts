@@ -46,6 +46,22 @@ type PatternCacheEntry = {
 };
 
 const patternCache = new Map<string, PatternCacheEntry>();
+const MAX_PATTERN_CACHE_ENTRIES = 100;
+
+function buildPatternCacheKey(domain: ArticleDomain | "All", articles: Article[]) {
+  const version = articles
+    .map((article) => [
+      article.id,
+      article.processed_at,
+      article.date,
+      article.importance,
+      article.tags.join(","),
+    ].join(":"))
+    .sort()
+    .join("|");
+
+  return `${domain}:${articles.length}:${version}`;
+}
 
 function startOfDay(date: Date) {
   const normalized = new Date(date);
@@ -269,17 +285,16 @@ export function analyzePatterns(
   articles: Article[],
   domain: ArticleDomain | "All" = "All",
 ) {
-  const cacheKey = domain;
+  const filteredArticles =
+    domain === "All"
+      ? articles
+      : articles.filter((article) => article.domain === domain);
+  const cacheKey = buildPatternCacheKey(domain, filteredArticles);
   const cached = patternCache.get(cacheKey);
 
   if (cached && cached.expiresAt > Date.now()) {
     return cached.value;
   }
-
-  const filteredArticles =
-    domain === "All"
-      ? articles
-      : articles.filter((article) => article.domain === domain);
 
   const today = startOfDay(new Date());
   const currentWindowStart = addDays(today, -(CURRENT_WINDOW_DAYS - 1));
@@ -319,6 +334,13 @@ export function analyzePatterns(
     value: analysis,
     expiresAt: Date.now() + ONE_HOUR,
   });
+  while (patternCache.size > MAX_PATTERN_CACHE_ENTRIES) {
+    const oldestKey = patternCache.keys().next().value;
+    if (!oldestKey) {
+      break;
+    }
+    patternCache.delete(oldestKey);
+  }
 
   return analysis;
 }

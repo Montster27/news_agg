@@ -181,6 +181,7 @@ export function SearchCommandPanel({
     q: query,
     ...filters,
     limit: 25,
+    recordRecent: false,
   }), [filters, query]);
 
   const refreshSearchLists = useCallback(async () => {
@@ -308,6 +309,27 @@ export function SearchCommandPanel({
     setFilters((current) => ({ ...current, ...next }));
   };
 
+  const recordRecentSearch = useCallback(async () => {
+    if (!window.desktop?.search || !searchActive) {
+      return;
+    }
+
+    try {
+      await window.desktop.search.query({
+        ...searchInput,
+        recordRecent: true,
+      });
+      await refreshSearchLists();
+    } catch {
+      setStatus("Search unavailable");
+    }
+  }, [refreshSearchLists, searchActive, searchInput]);
+
+  const handleSelectResult = (result: SearchResult) => {
+    setSelectedResult(result);
+    void recordRecentSearch();
+  };
+
   const toggleDomain = (domain: string) => {
     setFilters((current) => ({
       ...current,
@@ -376,6 +398,11 @@ export function SearchCommandPanel({
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  void recordRecentSearch();
+                }
+              }}
               onFocus={() => setShowRecent(true)}
               className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-base font-medium text-slate-900 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
               placeholder="Search cached articles"
@@ -561,7 +588,7 @@ export function SearchCommandPanel({
                   key={result.articleId}
                   result={result}
                   active={selectedResult?.articleId === result.articleId}
-                  onSelect={setSelectedResult}
+                  onSelect={handleSelectResult}
                 />
               ))}
             </div>

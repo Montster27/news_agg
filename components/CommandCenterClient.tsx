@@ -18,6 +18,7 @@ import { updateAffinitiesFromFeedback } from "@/lib/affinity";
 import { AppShell } from "@/components/AppShell";
 import { DesktopControls } from "@/components/DesktopControls";
 import { FiltersBar } from "@/components/FiltersBar";
+import { OutputGenerationPanel } from "@/components/OutputGenerationPanel";
 import { SearchCommandPanel } from "@/components/SearchCommandPanel";
 import { TopSignals } from "@/components/TopSignals";
 import { extractEntities, mergeEntities } from "@/lib/entities";
@@ -745,6 +746,34 @@ export function CommandCenterClient({
       watchItems,
     ],
   );
+  const outputData = useMemo(
+    () => ({
+      articles: sortedArticles,
+      storyClusters: sortedClusters,
+      brief,
+      patterns,
+      trendSignals,
+      narratives: narrativeThreads,
+      connections,
+      scenarios,
+      implications,
+      watchItems,
+      insightReport,
+    }),
+    [
+      brief,
+      connections,
+      implications,
+      insightReport,
+      narrativeThreads,
+      patterns,
+      scenarios,
+      sortedArticles,
+      sortedClusters,
+      trendSignals,
+      watchItems,
+    ],
+  );
 
   const setSingleTag = (tag: string) => {
     setActiveTags((current) =>
@@ -1002,6 +1031,8 @@ export function CommandCenterClient({
               onImportanceChange={handleImportanceChange}
               onImportanceReset={handleImportanceReset}
             />
+
+            <OutputGenerationPanel data={outputData} />
 
             <div className="xl:hidden">
               {rightRail}

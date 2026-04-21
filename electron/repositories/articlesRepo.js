@@ -249,7 +249,7 @@ function getArticles(db, filters = {}) {
     ${joins.join("\n")}
     ${whereSql}
     GROUP BY a.id
-    ORDER BY datetime(a.published_at) DESC, datetime(a.processed_at) DESC
+    ORDER BY a.published_at DESC, a.processed_at DESC
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset);
   const tagMap = tagsForArticles(db, rows.map((row) => row.id));

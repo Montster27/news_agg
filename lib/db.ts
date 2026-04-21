@@ -1,8 +1,11 @@
 import "server-only";
 
-import { Pool } from "pg";
+import { Pool, type PoolClient } from "pg";
 import type { WeeklyBrief } from "@/lib/brief";
+import type { InsightEngineResult } from "@/lib/insights";
+import type { GeneratedOutput } from "@/lib/output";
 import type { PatternAnalysis } from "@/lib/patterns";
+import type { OutputTemplate } from "@/lib/templates";
 import type {
   Article,
   ArticleDomain,
@@ -28,6 +31,8 @@ const databaseUrl =
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null;
 let initialized = false;
 let initPromise: Promise<void> | null = null;
+
+type Queryable = Pick<Pool, "query"> | Pick<PoolClient, "query">;
 
 type StoredPatternRow = {
   week: string;
@@ -65,6 +70,11 @@ type StoredArticleRow = {
   url: string | null;
   published_at: string;
   processed_at: string;
+};
+
+type StoredBriefRow = {
+  week: string;
+  content: WeeklyBrief;
 };
 
 type StoredUserFeedbackRow = {
@@ -149,6 +159,29 @@ type StoredWatchItemRow = {
   created_at: string;
 };
 
+type StoredGeneratedOutputRow = {
+  id: string;
+  type: GeneratedOutput["type"];
+  audience: GeneratedOutput["audience"];
+  title: string;
+  summary: string;
+  sections: GeneratedOutput["sections"];
+  metadata: GeneratedOutput["metadata"];
+  content: GeneratedOutput;
+  created_at: string;
+};
+
+type StoredTemplateRow = {
+  id: OutputTemplate["id"];
+  label: string;
+  description: string;
+  version: number;
+  default_audience: OutputTemplate["defaultAudience"];
+  sections: OutputTemplate["sections"];
+  created_at: string;
+  updated_at: string;
+};
+
 export type StoredInsight = {
   week: string;
   title: string;
@@ -179,6 +212,80 @@ export type LongTermTrendAnalysis = {
 
 export function hasDatabase() {
   return Boolean(pool);
+}
+
+async function withDbTransaction<T>(work: (client: Queryable) => Promise<T>) {
+  if (!pool) {
+    return null;
+  }
+
+  const maybePool = pool as unknown as {
+    connect?: () => Promise<PoolClient>;
+  };
+
+  if (typeof maybePool.connect !== "function") {
+    return work(pool);
+  }
+
+  const client = await maybePool.connect();
+
+  try {
+    await client.query("BEGIN");
+    const result = await work(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function formatWeek(value: Date) {
+  const utcDate = new Date(Date.UTC(value.getFullYear(), value.getMonth(), value.getDate()));
+  const day = utcDate.getUTCDay() || 7;
+  utcDate.setUTCDate(utcDate.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil((((utcDate.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${utcDate.getUTCFullYear()}-${String(weekNumber).padStart(2, "0")}`;
+}
+
+function coerceTags(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((tag): tag is string => typeof tag === "string");
+  }
+
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed)
+        ? parsed.filter((tag): tag is string => typeof tag === "string")
+        : [];
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+}
+
+function articleFromStoredRow(row: StoredArticleRow): Article {
+  const publishedAt = new Date(row.published_at);
+
+  return {
+    id: row.id,
+    date: publishedAt.toISOString().slice(0, 10),
+    processed_at: new Date(row.processed_at).toISOString(),
+    week: formatWeek(publishedAt),
+    domain: row.domain,
+    headline: row.headline,
+    summary: row.summary,
+    source: row.source ?? undefined,
+    url: row.url ?? undefined,
+    tags: coerceTags(row.tags),
+    importance: row.importance,
+  };
 }
 
 export async function initDb() {
@@ -373,6 +480,33 @@ export async function initDb() {
     `);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS generated_outputs (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        audience TEXT NOT NULL,
+        title TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        sections JSONB NOT NULL,
+        metadata JSONB NOT NULL,
+        content JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS templates (
+        id TEXT PRIMARY KEY,
+        label TEXT NOT NULL,
+        description TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        default_audience TEXT NOT NULL,
+        sections JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    await pool.query(`
       CREATE INDEX IF NOT EXISTS articles_published_at_idx
       ON articles (published_at DESC);
     `);
@@ -447,6 +581,16 @@ export async function initDb() {
       ON scenarios (created_at DESC);
     `);
 
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS generated_outputs_created_at_idx
+      ON generated_outputs (created_at DESC);
+    `);
+
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS generated_outputs_type_audience_idx
+      ON generated_outputs (type, audience);
+    `);
+
     initialized = true;
     initPromise = null;
   })();
@@ -461,9 +605,37 @@ export async function saveArticlesToDb(articles: Article[]) {
 
   await initDb();
 
-  for (const article of articles) {
-    await pool.query(
+  const rows = articles.map((article) => ({
+    id: article.id,
+    headline: article.headline,
+    summary: article.summary,
+    domain: article.domain,
+    tags: article.tags,
+    importance: article.importance,
+    source: article.source ?? null,
+    url: article.url ?? article.id,
+    published_at: article.date,
+    processed_at: article.processed_at,
+  }));
+
+  await withDbTransaction((client) =>
+    client.query(
       `
+        WITH input AS (
+          SELECT *
+          FROM jsonb_to_recordset($1::jsonb) AS article(
+            id TEXT,
+            headline TEXT,
+            summary TEXT,
+            domain TEXT,
+            tags JSONB,
+            importance INTEGER,
+            source TEXT,
+            url TEXT,
+            published_at TIMESTAMPTZ,
+            processed_at TIMESTAMPTZ
+          )
+        )
         INSERT INTO articles (
           id,
           headline,
@@ -476,7 +648,18 @@ export async function saveArticlesToDb(articles: Article[]) {
           published_at,
           processed_at
         )
-        VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9,$10)
+        SELECT
+          id,
+          headline,
+          summary,
+          domain,
+          tags,
+          importance,
+          source,
+          url,
+          published_at,
+          processed_at
+        FROM input
         ON CONFLICT (url) DO UPDATE SET
           summary = EXCLUDED.summary,
           domain = EXCLUDED.domain,
@@ -484,20 +667,9 @@ export async function saveArticlesToDb(articles: Article[]) {
           importance = EXCLUDED.importance,
           processed_at = EXCLUDED.processed_at
       `,
-      [
-        article.id,
-        article.headline,
-        article.summary,
-        article.domain,
-        JSON.stringify(article.tags),
-        article.importance,
-        article.source ?? null,
-        article.url ?? article.id,
-        article.date,
-        article.processed_at,
-      ],
-    );
-  }
+      [JSON.stringify(rows)],
+    ),
+  );
 }
 
 function storyClusterFromRow(row: StoredStoryClusterRow): StoryCluster {
@@ -526,9 +698,49 @@ export async function saveStoryClustersToDb(clusters: StoryCluster[]) {
 
   await initDb();
 
-  for (const cluster of clusters) {
-    await pool.query(
+  const clusterRows = clusters.map((cluster) => ({
+    id: cluster.id,
+    headline: cluster.headline,
+    summary: cluster.summary,
+    why_it_matters: cluster.whyItMatters,
+    domain: cluster.domain,
+    tags: cluster.tags,
+    entities: cluster.entities,
+    sources: cluster.sources,
+    source_count: cluster.sourceCount,
+    confidence: cluster.confidence,
+    impact_score: cluster.impactScore,
+    first_seen_at: cluster.firstSeenAt,
+    last_seen_at: cluster.lastSeenAt,
+  }));
+  const articleRows = clusters.flatMap((cluster) =>
+    cluster.articleIds.map((articleId) => ({
+      cluster_id: cluster.id,
+      article_id: articleId,
+    })),
+  );
+
+  await withDbTransaction(async (client) => {
+    await client.query(
       `
+        WITH input AS (
+          SELECT *
+          FROM jsonb_to_recordset($1::jsonb) AS cluster(
+            id TEXT,
+            headline TEXT,
+            summary TEXT,
+            why_it_matters JSONB,
+            domain TEXT,
+            tags JSONB,
+            entities JSONB,
+            sources JSONB,
+            source_count INTEGER,
+            confidence TEXT,
+            impact_score REAL,
+            first_seen_at TIMESTAMPTZ,
+            last_seen_at TIMESTAMPTZ
+          )
+        )
         INSERT INTO story_clusters (
           id,
           headline,
@@ -544,7 +756,21 @@ export async function saveStoryClustersToDb(clusters: StoryCluster[]) {
           first_seen_at,
           last_seen_at
         )
-        VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,$12,$13)
+        SELECT
+          id,
+          headline,
+          summary,
+          why_it_matters,
+          domain,
+          tags,
+          entities,
+          sources,
+          source_count,
+          confidence,
+          impact_score,
+          first_seen_at,
+          last_seen_at
+        FROM input
         ON CONFLICT (id) DO UPDATE SET
           headline = EXCLUDED.headline,
           summary = EXCLUDED.summary,
@@ -559,36 +785,31 @@ export async function saveStoryClustersToDb(clusters: StoryCluster[]) {
           first_seen_at = LEAST(story_clusters.first_seen_at, EXCLUDED.first_seen_at),
           last_seen_at = GREATEST(story_clusters.last_seen_at, EXCLUDED.last_seen_at)
       `,
-      [
-        cluster.id,
-        cluster.headline,
-        cluster.summary,
-        JSON.stringify(cluster.whyItMatters),
-        cluster.domain,
-        JSON.stringify(cluster.tags),
-        JSON.stringify(cluster.entities),
-        JSON.stringify(cluster.sources),
-        cluster.sourceCount,
-        cluster.confidence,
-        cluster.impactScore,
-        cluster.firstSeenAt,
-        cluster.lastSeenAt,
-      ],
+      [JSON.stringify(clusterRows)],
     );
+    await client.query("DELETE FROM story_cluster_articles WHERE cluster_id = ANY($1::text[])", [
+      clusters.map((cluster) => cluster.id),
+    ]);
 
-    await pool.query("DELETE FROM story_cluster_articles WHERE cluster_id = $1", [cluster.id]);
-
-    for (const articleId of cluster.articleIds) {
-      await pool.query(
+    if (articleRows.length) {
+      await client.query(
         `
+          WITH input AS (
+            SELECT *
+            FROM jsonb_to_recordset($1::jsonb) AS article(
+              cluster_id TEXT,
+              article_id TEXT
+            )
+          )
           INSERT INTO story_cluster_articles (cluster_id, article_id)
-          VALUES ($1, $2)
+          SELECT cluster_id, article_id
+          FROM input
           ON CONFLICT (cluster_id, article_id) DO NOTHING
         `,
-        [cluster.id, articleId],
+        [JSON.stringify(articleRows)],
       );
     }
-  }
+  });
 }
 
 export async function getLatestStoryClusters(
@@ -654,6 +875,94 @@ export async function getClusterArticles(clusterId: string) {
     tags: row.tags ?? [],
     importance: row.importance,
   }));
+}
+
+export async function getLatestArticles(
+  domain: ArticleDomain | "All" = "All",
+  limit = 100,
+) {
+  if (!pool) {
+    return [];
+  }
+
+  await initDb();
+  const params: Array<string | number> = [limit];
+  const domainClause =
+    domain === "All"
+      ? ""
+      : `WHERE domain = $${params.push(domain)}`;
+  const result = await pool.query<StoredArticleRow>(
+    `
+      SELECT
+        id,
+        headline,
+        summary,
+        domain,
+        tags,
+        importance,
+        source,
+        url,
+        published_at,
+        processed_at
+      FROM articles
+      ${domainClause}
+      ORDER BY published_at DESC, processed_at DESC
+      LIMIT $1
+    `,
+    params,
+  );
+
+  return result.rows.map(articleFromStoredRow);
+}
+
+export async function getLatestBrief() {
+  if (!pool) {
+    return null;
+  }
+
+  await initDb();
+  const result = await pool.query<StoredBriefRow>(
+    `
+      SELECT week, content
+      FROM briefs
+      ORDER BY week DESC
+      LIMIT 1
+    `,
+  );
+
+  return result.rows[0]?.content ?? null;
+}
+
+export async function getLatestInsightReport(): Promise<InsightEngineResult | null> {
+  if (!pool) {
+    return null;
+  }
+
+  await initDb();
+  const result = await pool.query<StoredInsight>(
+    `
+      SELECT week, title, explanation, confidence
+      FROM insights
+      WHERE week = (SELECT week FROM insights ORDER BY week DESC LIMIT 1)
+      ORDER BY id ASC
+    `,
+  );
+
+  if (!result.rows.length) {
+    return null;
+  }
+
+  return {
+    insights: result.rows.map((row) => ({
+      title: row.title,
+      explanation: row.explanation,
+      confidence: row.confidence as "low" | "medium" | "high",
+    })),
+    inflections: [],
+    crossDomainShifts: [],
+    generatedAt: new Date().toISOString(),
+    usedFallback: true,
+  };
 }
 
 function userFeedbackFromRow(row: StoredUserFeedbackRow): UserFeedback {
@@ -867,9 +1176,39 @@ export async function saveNarratives(narratives: NarrativeThread[]) {
 
   await initDb();
 
-  for (const narrative of narratives) {
-    await pool.query(
+  const rows = narratives.map((narrative) => ({
+    id: narrative.id,
+    title: narrative.title,
+    summary: narrative.summary,
+    direction: narrative.direction,
+    tags: narrative.tags,
+    entities: narrative.entities,
+    cluster_ids: narrative.clusterIds,
+    timeline: narrative.timeline,
+    first_seen_at: narrative.firstSeenAt,
+    last_seen_at: narrative.lastSeenAt,
+    strength: narrative.strength,
+  }));
+
+  await withDbTransaction((client) =>
+    client.query(
       `
+        WITH input AS (
+          SELECT *
+          FROM jsonb_to_recordset($1::jsonb) AS narrative(
+            id TEXT,
+            title TEXT,
+            summary TEXT,
+            direction TEXT,
+            tags JSONB,
+            entities JSONB,
+            cluster_ids JSONB,
+            timeline JSONB,
+            first_seen_at TIMESTAMPTZ,
+            last_seen_at TIMESTAMPTZ,
+            strength REAL
+          )
+        )
         INSERT INTO narrative_threads (
           id,
           title,
@@ -883,7 +1222,19 @@ export async function saveNarratives(narratives: NarrativeThread[]) {
           last_seen_at,
           strength
         )
-        VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11)
+        SELECT
+          id,
+          title,
+          summary,
+          direction,
+          tags,
+          entities,
+          cluster_ids,
+          timeline,
+          first_seen_at,
+          last_seen_at,
+          strength
+        FROM input
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           summary = EXCLUDED.summary,
@@ -896,21 +1247,9 @@ export async function saveNarratives(narratives: NarrativeThread[]) {
           last_seen_at = GREATEST(narrative_threads.last_seen_at, EXCLUDED.last_seen_at),
           strength = EXCLUDED.strength
       `,
-      [
-        narrative.id,
-        narrative.title,
-        narrative.summary,
-        narrative.direction,
-        JSON.stringify(narrative.tags),
-        JSON.stringify(narrative.entities),
-        JSON.stringify(narrative.clusterIds),
-        JSON.stringify(narrative.timeline),
-        narrative.firstSeenAt,
-        narrative.lastSeenAt,
-        narrative.strength,
-      ],
-    );
-  }
+      [JSON.stringify(rows)],
+    ),
+  );
 }
 
 export async function getNarratives(limit = 12) {
@@ -939,10 +1278,31 @@ export async function saveTrends(trends: TrendSignal[]) {
 
   await initDb();
   const computedAt = new Date().toISOString();
+  const rows = trends.map((trend) => ({
+    tag: trend.tag,
+    direction: trend.direction,
+    velocity: trend.velocity,
+    current_count: trend.current,
+    previous_count: trend.previous,
+    points: trend.points,
+    computed_at: computedAt,
+  }));
 
-  for (const trend of trends) {
-    await pool.query(
+  await withDbTransaction((client) =>
+    client.query(
       `
+        WITH input AS (
+          SELECT *
+          FROM jsonb_to_recordset($1::jsonb) AS trend(
+            tag TEXT,
+            direction TEXT,
+            velocity REAL,
+            current_count INTEGER,
+            previous_count INTEGER,
+            points JSONB,
+            computed_at TIMESTAMPTZ
+          )
+        )
         INSERT INTO trend_signals (
           tag,
           direction,
@@ -952,7 +1312,8 @@ export async function saveTrends(trends: TrendSignal[]) {
           points,
           computed_at
         )
-        VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7)
+        SELECT tag, direction, velocity, current_count, previous_count, points, computed_at
+        FROM input
         ON CONFLICT (tag) DO UPDATE SET
           direction = EXCLUDED.direction,
           velocity = EXCLUDED.velocity,
@@ -961,17 +1322,9 @@ export async function saveTrends(trends: TrendSignal[]) {
           points = EXCLUDED.points,
           computed_at = EXCLUDED.computed_at
       `,
-      [
-        trend.tag,
-        trend.direction,
-        trend.velocity,
-        trend.current,
-        trend.previous,
-        JSON.stringify(trend.points),
-        computedAt,
-      ],
-    );
-  }
+      [JSON.stringify(rows)],
+    ),
+  );
 }
 
 export async function getTrends(limit = 12) {
@@ -1000,10 +1353,33 @@ export async function saveConnections(connections: ConnectionStrength[]) {
 
   await initDb();
   const computedAt = new Date().toISOString();
+  const rows = connections.map((connection) => ({
+    id: connection.id,
+    source: connection.source,
+    target: connection.target,
+    source_type: connection.sourceType,
+    target_type: connection.targetType,
+    weight: connection.weight,
+    cluster_ids: connection.clusterIds,
+    computed_at: computedAt,
+  }));
 
-  for (const connection of connections) {
-    await pool.query(
+  await withDbTransaction((client) =>
+    client.query(
       `
+        WITH input AS (
+          SELECT *
+          FROM jsonb_to_recordset($1::jsonb) AS connection(
+            id TEXT,
+            source TEXT,
+            target TEXT,
+            source_type TEXT,
+            target_type TEXT,
+            weight REAL,
+            cluster_ids JSONB,
+            computed_at TIMESTAMPTZ
+          )
+        )
         INSERT INTO connections (
           id,
           source,
@@ -1014,7 +1390,8 @@ export async function saveConnections(connections: ConnectionStrength[]) {
           cluster_ids,
           computed_at
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)
+        SELECT id, source, target, source_type, target_type, weight, cluster_ids, computed_at
+        FROM input
         ON CONFLICT (id) DO UPDATE SET
           source = EXCLUDED.source,
           target = EXCLUDED.target,
@@ -1024,18 +1401,9 @@ export async function saveConnections(connections: ConnectionStrength[]) {
           cluster_ids = EXCLUDED.cluster_ids,
           computed_at = EXCLUDED.computed_at
       `,
-      [
-        connection.id,
-        connection.source,
-        connection.target,
-        connection.sourceType,
-        connection.targetType,
-        connection.weight,
-        JSON.stringify(connection.clusterIds),
-        computedAt,
-      ],
-    );
-  }
+      [JSON.stringify(rows)],
+    ),
+  );
 }
 
 export async function getConnections(limit = 15) {
@@ -1064,10 +1432,31 @@ export async function saveScenarios(scenarios: Scenario[]) {
 
   await initDb();
   const createdAt = new Date().toISOString();
+  const rows = scenarios.map((scenario) => ({
+    id: scenario.id,
+    title: scenario.title,
+    description: scenario.description,
+    drivers: scenario.drivers,
+    likelihood: scenario.likelihood,
+    time_horizon: scenario.timeHorizon,
+    created_at: createdAt,
+  }));
 
-  for (const scenario of scenarios) {
-    await pool.query(
+  await withDbTransaction((client) =>
+    client.query(
       `
+        WITH input AS (
+          SELECT *
+          FROM jsonb_to_recordset($1::jsonb) AS scenario(
+            id TEXT,
+            title TEXT,
+            description TEXT,
+            drivers JSONB,
+            likelihood TEXT,
+            time_horizon TEXT,
+            created_at TIMESTAMPTZ
+          )
+        )
         INSERT INTO scenarios (
           id,
           title,
@@ -1077,7 +1466,8 @@ export async function saveScenarios(scenarios: Scenario[]) {
           time_horizon,
           created_at
         )
-        VALUES ($1,$2,$3,$4::jsonb,$5,$6,$7)
+        SELECT id, title, description, drivers, likelihood, time_horizon, created_at
+        FROM input
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           description = EXCLUDED.description,
@@ -1086,17 +1476,9 @@ export async function saveScenarios(scenarios: Scenario[]) {
           time_horizon = EXCLUDED.time_horizon,
           created_at = EXCLUDED.created_at
       `,
-      [
-        scenario.id,
-        scenario.title,
-        scenario.description,
-        JSON.stringify(scenario.drivers),
-        scenario.likelihood,
-        scenario.timeHorizon,
-        createdAt,
-      ],
-    );
-  }
+      [JSON.stringify(rows)],
+    ),
+  );
 }
 
 export async function getScenarios(limit = 10) {
@@ -1131,30 +1513,41 @@ export async function saveImplications(implications: ScenarioImplication[]) {
 
   await initDb();
   const createdAt = new Date().toISOString();
+  const rows = implications.map((implication) => ({
+    scenario_id: implication.scenarioId,
+    consequences: implication.consequences,
+    domain_impacts: implication.domainImpacts,
+    created_at: createdAt,
+  }));
 
-  for (const implication of implications) {
-    await pool.query(
+  await withDbTransaction((client) =>
+    client.query(
       `
+        WITH input AS (
+          SELECT *
+          FROM jsonb_to_recordset($1::jsonb) AS implication(
+            scenario_id TEXT,
+            consequences JSONB,
+            domain_impacts JSONB,
+            created_at TIMESTAMPTZ
+          )
+        )
         INSERT INTO implications (
           scenario_id,
           consequences,
           domain_impacts,
           created_at
         )
-        VALUES ($1,$2::jsonb,$3::jsonb,$4)
+        SELECT scenario_id, consequences, domain_impacts, created_at
+        FROM input
         ON CONFLICT (scenario_id) DO UPDATE SET
           consequences = EXCLUDED.consequences,
           domain_impacts = EXCLUDED.domain_impacts,
           created_at = EXCLUDED.created_at
       `,
-      [
-        implication.scenarioId,
-        JSON.stringify(implication.consequences),
-        JSON.stringify(implication.domainImpacts),
-        createdAt,
-      ],
-    );
-  }
+      [JSON.stringify(rows)],
+    ),
+  );
 }
 
 export async function getImplications(limit = 10) {
@@ -1183,30 +1576,41 @@ export async function saveWatchItems(watchItems: WatchItem[]) {
 
   await initDb();
   const createdAt = new Date().toISOString();
+  const rows = watchItems.map((item) => ({
+    scenario_id: item.scenarioId,
+    signals: item.signals,
+    indicators: item.indicators,
+    created_at: createdAt,
+  }));
 
-  for (const item of watchItems) {
-    await pool.query(
+  await withDbTransaction((client) =>
+    client.query(
       `
+        WITH input AS (
+          SELECT *
+          FROM jsonb_to_recordset($1::jsonb) AS watch_item(
+            scenario_id TEXT,
+            signals JSONB,
+            indicators JSONB,
+            created_at TIMESTAMPTZ
+          )
+        )
         INSERT INTO watch_items (
           scenario_id,
           signals,
           indicators,
           created_at
         )
-        VALUES ($1,$2::jsonb,$3::jsonb,$4)
+        SELECT scenario_id, signals, indicators, created_at
+        FROM input
         ON CONFLICT (scenario_id) DO UPDATE SET
           signals = EXCLUDED.signals,
           indicators = EXCLUDED.indicators,
           created_at = EXCLUDED.created_at
       `,
-      [
-        item.scenarioId,
-        JSON.stringify(item.signals),
-        JSON.stringify(item.indicators),
-        createdAt,
-      ],
-    );
-  }
+      [JSON.stringify(rows)],
+    ),
+  );
 }
 
 export async function getWatchItems(limit = 10) {
@@ -1252,17 +1656,32 @@ export async function savePatternSnapshot(analysis: PatternAnalysis) {
   await initDb();
 
   const rows = rowsFromAnalysis(analysis);
-  for (const row of rows) {
-    await pool.query(
+  if (!rows.length) {
+    return;
+  }
+
+  await withDbTransaction((client) =>
+    client.query(
       `
+        WITH input AS (
+          SELECT *
+          FROM jsonb_to_recordset($1::jsonb) AS pattern(
+            week TEXT,
+            domain TEXT,
+            tag TEXT,
+            count INTEGER,
+            delta INTEGER
+          )
+        )
         INSERT INTO patterns (week, domain, tag, count, delta)
-        VALUES ($1, $2, $3, $4, $5)
+        SELECT week, domain, tag, count, delta
+        FROM input
         ON CONFLICT (week, domain, tag)
         DO UPDATE SET count = EXCLUDED.count, delta = EXCLUDED.delta
       `,
-      [row.week, row.domain, row.tag, row.count, row.delta],
-    );
-  }
+      [JSON.stringify(rows)],
+    ),
+  );
 }
 
 export async function saveBriefToDb(week: string, content: WeeklyBrief) {
@@ -1291,27 +1710,201 @@ export async function saveInsightsToDb(
   }
 
   await initDb();
+  const rows = insights.map((insight) => ({
+    week,
+    title: insight.title,
+    explanation: insight.explanation,
+    confidence: insight.confidence,
+    content: insight,
+  }));
 
-  for (const insight of insights) {
-    await pool.query(
+  await withDbTransaction((client) =>
+    client.query(
       `
+        WITH input AS (
+          SELECT *
+          FROM jsonb_to_recordset($1::jsonb) AS insight(
+            week TEXT,
+            title TEXT,
+            explanation TEXT,
+            confidence TEXT,
+            content JSONB
+          )
+        )
         INSERT INTO insights (week, title, explanation, confidence, content)
-        VALUES ($1, $2, $3, $4, $5::jsonb)
+        SELECT week, title, explanation, confidence, content
+        FROM input
         ON CONFLICT (week, title)
         DO UPDATE SET
           explanation = EXCLUDED.explanation,
           confidence = EXCLUDED.confidence,
           content = EXCLUDED.content
       `,
-      [
-        week,
-        insight.title,
-        insight.explanation,
-        insight.confidence,
-        JSON.stringify(insight),
-      ],
-    );
+      [JSON.stringify(rows)],
+    ),
+  );
+}
+
+function generatedOutputFromRow(row: StoredGeneratedOutputRow): GeneratedOutput {
+  return {
+    ...row.content,
+    id: row.id,
+    type: row.type,
+    audience: row.audience,
+    title: row.title,
+    summary: row.summary,
+    sections: row.sections ?? [],
+    metadata: {
+      ...row.metadata,
+      generatedAt: row.metadata?.generatedAt ?? new Date(row.created_at).toISOString(),
+    },
+  };
+}
+
+function templateFromRow(row: StoredTemplateRow): OutputTemplate {
+  return {
+    id: row.id,
+    label: row.label,
+    description: row.description,
+    version: Number(row.version),
+    defaultAudience: row.default_audience,
+    sections: row.sections ?? [],
+  };
+}
+
+export async function saveGeneratedOutputToDb(output: GeneratedOutput) {
+  if (!pool) {
+    return;
   }
+
+  await initDb();
+  await pool.query(
+    `
+      INSERT INTO generated_outputs (
+        id,
+        type,
+        audience,
+        title,
+        summary,
+        sections,
+        metadata,
+        content,
+        created_at
+      )
+      VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9)
+      ON CONFLICT (id) DO UPDATE SET
+        type = EXCLUDED.type,
+        audience = EXCLUDED.audience,
+        title = EXCLUDED.title,
+        summary = EXCLUDED.summary,
+        sections = EXCLUDED.sections,
+        metadata = EXCLUDED.metadata,
+        content = EXCLUDED.content,
+        created_at = EXCLUDED.created_at
+    `,
+    [
+      output.id,
+      output.type,
+      output.audience,
+      output.title,
+      output.summary,
+      JSON.stringify(output.sections),
+      JSON.stringify(output.metadata),
+      JSON.stringify(output),
+      output.metadata.generatedAt,
+    ],
+  );
+}
+
+export async function getGeneratedOutputs(input?: {
+  type?: GeneratedOutput["type"];
+  audience?: GeneratedOutput["audience"];
+  limit?: number;
+}) {
+  if (!pool) {
+    return [];
+  }
+
+  await initDb();
+  const params: Array<string | number> = [input?.limit ?? 20];
+  const filters: string[] = [];
+
+  if (input?.type) {
+    filters.push(`type = $${params.push(input.type)}`);
+  }
+
+  if (input?.audience) {
+    filters.push(`audience = $${params.push(input.audience)}`);
+  }
+
+  const whereClause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+  const result = await pool.query<StoredGeneratedOutputRow>(
+    `
+      SELECT *
+      FROM generated_outputs
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT $1
+    `,
+    params,
+  );
+
+  return result.rows.map(generatedOutputFromRow);
+}
+
+export async function saveTemplateToDb(template: OutputTemplate) {
+  if (!pool) {
+    return;
+  }
+
+  await initDb();
+  await pool.query(
+    `
+      INSERT INTO templates (
+        id,
+        label,
+        description,
+        version,
+        default_audience,
+        sections,
+        created_at,
+        updated_at
+      )
+      VALUES ($1,$2,$3,$4,$5,$6::jsonb,NOW(),NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        label = EXCLUDED.label,
+        description = EXCLUDED.description,
+        version = EXCLUDED.version,
+        default_audience = EXCLUDED.default_audience,
+        sections = EXCLUDED.sections,
+        updated_at = NOW()
+    `,
+    [
+      template.id,
+      template.label,
+      template.description,
+      template.version,
+      template.defaultAudience,
+      JSON.stringify(template.sections),
+    ],
+  );
+}
+
+export async function getTemplates() {
+  if (!pool) {
+    return [];
+  }
+
+  await initDb();
+  const result = await pool.query<StoredTemplateRow>(
+    `
+      SELECT *
+      FROM templates
+      ORDER BY id ASC
+    `,
+  );
+
+  return result.rows.map(templateFromRow);
 }
 
 export async function getTagTrend(

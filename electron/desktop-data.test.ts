@@ -510,6 +510,7 @@ describe("Electron Phase 2 local data layer", () => {
       q: "AI infrastructure",
       tags: ["ai_infrastructure"],
       limit: 10,
+      recordRecent: true,
     });
     const saveResult = saveSearch(db, {
       name: "AI infra energy",
