@@ -1,5 +1,7 @@
 export type ArticleDomain =
-  | "AI"
+  | "AIUse"
+  | "LLM"
+  | "AIInfra"
   | "Semis"
   | "Cloud"
   | "Security"
@@ -15,7 +17,9 @@ export type ArticleDomain =
   | "General";
 
 export const ARTICLE_DOMAINS: readonly ArticleDomain[] = [
-  "AI",
+  "AIUse",
+  "LLM",
+  "AIInfra",
   "Semis",
   "Cloud",
   "Security",
@@ -31,12 +35,32 @@ export const ARTICLE_DOMAINS: readonly ArticleDomain[] = [
   "General",
 ] as const;
 
+export const DOMAIN_LABELS: Record<ArticleDomain, string> = {
+  AIUse: "AI Use",
+  LLM: "LLM",
+  AIInfra: "AI Infra",
+  Semis: "Semis",
+  Cloud: "Cloud",
+  Security: "Security",
+  Consumer: "Consumer",
+  Bio: "Bio",
+  Climate: "Climate",
+  Crypto: "Crypto",
+  Policy: "Policy",
+  Space: "Space",
+  Robotics: "Robotics",
+  Batteries: "Batteries",
+  AR: "AR",
+  General: "General",
+};
+
 export const LEGACY_DOMAIN_REMAP: Record<string, ArticleDomain> = {
   Chips: "Semis",
   Infra: "Cloud",
   Energy: "Climate",
   Macro: "Policy",
   Frontier: "General",
+  AI: "LLM",
 };
 
 export function normalizeArticleDomain(value: unknown): ArticleDomain {
@@ -60,6 +84,7 @@ export type Article = {
   url?: string;
   tags: string[];
   importance: 1 | 2 | 3 | 4 | 5;
+  originalImportance?: 1 | 2 | 3 | 4 | 5;
 };
 
 export type EntityType = "company" | "person" | "product" | "technology" | "place" | "other";

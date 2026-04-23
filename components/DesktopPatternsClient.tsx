@@ -8,7 +8,9 @@ import type { ArticleDomain } from "@/lib/types";
 
 const domains: Array<ArticleDomain | "All"> = [
   "All",
-  "AI",
+  "AIUse",
+  "LLM",
+  "AIInfra",
   "Semis",
   "Cloud",
   "Security",

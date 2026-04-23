@@ -18,7 +18,7 @@ function makeCluster(overrides: Partial<StoryCluster> = {}): StoryCluster {
     headline: "OpenAI launches new infra plan",
     summary: "A new data-center push.",
     whyItMatters: ["power", "chips"],
-    domain: "AI",
+    domain: "LLM",
     domainSecondary: [],
     tags: ["ai_infra", "energy"],
     entities: [
@@ -261,7 +261,7 @@ describe("clusterMemoryInfo", () => {
 });
 
 describe("domainMemoryInfo", () => {
-  const domain: ArticleDomain = "AI";
+  const domain: ArticleDomain = "LLM";
 
   it("counts every cluster as new when domain never viewed", () => {
     const clusters = [

@@ -34,7 +34,7 @@ function sampleCluster(overrides = {}) {
     id: "cluster-1",
     headline: "AI spend keeps climbing",
     summary: "OpenAI, Google and Microsoft push bigger infra.",
-    domain: "AI",
+    domain: "LLM",
     domainSecondary: ["Cloud"],
     tags: ["ai_infra", "capex"],
     entities: [

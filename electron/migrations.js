@@ -252,6 +252,79 @@ const migrations = [
       }
     },
   },
+  {
+    version: 5,
+    name: "split_ai_into_use_llm_infra",
+    up(db) {
+      const LLM_SOURCES = new Set([
+        "OpenAI Blog",
+        "Anthropic Blog",
+        "DeepMind",
+        "Google AI Blog",
+        "Meta AI Blog",
+        "Hugging Face Blog",
+        "Arxiv AI",
+        "The Batch (deeplearning.ai)",
+      ]);
+      const USE_SOURCES = new Set([
+        "MIT Technology Review",
+        "AI News",
+      ]);
+
+      const infraKeywordRegex =
+        /\b(nvidia|gpu|h100|h200|b100|b200|blackwell|hopper|tpu|accelerator|data ?center|datacenter|inference|training cluster|hbm|cuda|rocm|compute cluster|supercomputer|ai chip|ai infrastructure|ai infra)\b/i;
+
+      const infraTags = new Set([
+        "nvidia", "gpu", "tpu", "ai_infrastructure", "ai_infra",
+        "ai_hardware", "inference", "training_infrastructure",
+        "accelerator", "ai_compute", "datacenter",
+      ]);
+
+      const rows = db
+        .prepare(
+          `SELECT a.id, a.headline, a.source,
+                  COALESCE(group_concat(t.name, ' '), '') AS tags_text
+           FROM articles a
+           LEFT JOIN article_tags at ON at.article_id = a.id
+           LEFT JOIN tags t ON t.id = at.tag_id
+           WHERE a.domain = 'AI'
+           GROUP BY a.id`,
+        )
+        .all();
+
+      const updateDomain = db.prepare(
+        "UPDATE articles SET domain = ? WHERE id = ?",
+      );
+
+      const reclassify = db.transaction(() => {
+        for (const row of rows) {
+          const headline = String(row.headline ?? "");
+          const source = String(row.source ?? "");
+          const tagsText = String(row.tags_text ?? "");
+
+          let next = "LLM";
+
+          const hasInfraTag = tagsText
+            .split(/\s+/)
+            .some((tag) => infraTags.has(tag));
+
+          if (infraKeywordRegex.test(headline) || hasInfraTag) {
+            next = "AIInfra";
+          } else if (USE_SOURCES.has(source)) {
+            next = "AIUse";
+          } else if (LLM_SOURCES.has(source)) {
+            next = "LLM";
+          } else {
+            next = "LLM";
+          }
+
+          updateDomain.run(next, row.id);
+        }
+      });
+
+      reclassify();
+    },
+  },
 ];
 
 function ensureSchemaVersionTable(db) {

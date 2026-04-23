@@ -24,7 +24,7 @@ function article(overrides: Partial<Article> = {}): Article {
     date: "2026-04-18",
     processed_at: "2026-04-18T00:00:00.000Z",
     week: "2026-16",
-    domain: "AI",
+    domain: "LLM",
     headline: "AI data centers strain power supply",
     summary: "Operators are shifting infrastructure plans around power constraints.",
     tags: ["ai_infrastructure", "energy_constraint"],
@@ -39,7 +39,7 @@ function cluster(overrides: Partial<StoryCluster> = {}): StoryCluster {
     headline: "AI data centers strain power supply",
     summary: "Operators are shifting infrastructure plans around power constraints.",
     whyItMatters: ["Business", "Technical", "Watch"],
-    domain: "AI",
+    domain: "LLM",
     tags: ["ai_infrastructure", "energy_constraint"],
     entities: [{ name: "AI", normalized: "ai", type: "technology" }],
     articleIds: ["a1"],
@@ -91,8 +91,8 @@ describe("importance feedback", () => {
 
   it("builds capped learned adjustments from repeated feedback", () => {
     const articles = [
-      article({ id: "a1", domain: "AI" }),
-      article({ id: "a2", domain: "AI", importance: 2 }),
+      article({ id: "a1", domain: "LLM" }),
+      article({ id: "a2", domain: "LLM", importance: 2 }),
       article({ id: "a3", domain: "Policy", tags: ["consumer_gadgets"] }),
     ];
     const feedback: Record<string, ImportanceFeedback> = {
@@ -156,7 +156,7 @@ describe("importance feedback", () => {
   it("scores story clusters with profile tag and domain alignment", () => {
     const profile: UserProfile = {
       ...baseProfile,
-      preferred_domains: ["AI"],
+      preferred_domains: ["LLM"],
       preferred_tags: ["ai_infrastructure"],
     };
 

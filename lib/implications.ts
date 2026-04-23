@@ -8,8 +8,10 @@ function impactedDomains(scenario: Scenario): Array<ArticleDomain | "Cross-domai
   const text = textForScenario(scenario);
   const domains: Array<ArticleDomain | "Cross-domain"> = [];
 
-  if (/(ai|model|inference|agent|openai|frontier|llm)/.test(text)) domains.push("AI");
-  if (/(chip|gpu|semiconductor|nvidia|tsmc|memory|fab)/.test(text)) domains.push("Semis");
+  if (/(nvidia|gpu|tpu|accelerator|inference infra|training cluster|data ?center)/.test(text)) domains.push("AIInfra");
+  if (/(openai|anthropic|deepmind|llm|foundation model|frontier model|arxiv)/.test(text)) domains.push("LLM");
+  if (/(ai|model|agent|inference)/.test(text)) domains.push("AIUse");
+  if (/(chip|semiconductor|tsmc|memory|fab)/.test(text)) domains.push("Semis");
   if (/(data center|hyperscaler|cloud|aws|azure|gcp)/.test(text)) domains.push("Cloud");
   if (/(security|cyber|breach|ransomware|cve)/.test(text)) domains.push("Security");
   if (/(consumer|iphone|smartphone|retail)/.test(text)) domains.push("Consumer");

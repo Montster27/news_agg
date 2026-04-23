@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-type NavIconName = "dashboard" | "trends" | "patterns" | "brief";
+type NavIconName = "dashboard" | "scan" | "trends" | "patterns" | "brief";
 
 type NavItem = {
   href: string;
@@ -10,6 +10,7 @@ type NavItem = {
 
 const items: NavItem[] = [
   { href: "/", label: "Dashboard", icon: "dashboard" },
+  { href: "/scan", label: "Scan", icon: "scan" },
   { href: "/trends", label: "Trends", icon: "trends" },
   { href: "/patterns", label: "Patterns", icon: "patterns" },
   { href: "/brief", label: "Brief", icon: "brief" },
@@ -27,6 +28,13 @@ function NavIcon({ name }: { name: NavIconName }) {
     strokeLinejoin: "round" as const,
   };
   switch (name) {
+    case "scan":
+      return (
+        <svg {...common} aria-hidden="true">
+          <path d="M3 5h14M3 10h14M3 15h8" />
+          <rect x="13" y="12" width="5" height="5" rx="1" />
+        </svg>
+      );
     case "dashboard":
       return (
         <svg {...common} aria-hidden="true">

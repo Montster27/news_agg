@@ -18,7 +18,7 @@ function cluster(overrides: Partial<StoryCluster> = {}): StoryCluster {
     headline: "OpenAI expands AI infrastructure plans",
     summary: "OpenAI is adding data center capacity.",
     whyItMatters: ["Business impact", "Technical impact", "Watch capacity"],
-    domain: "AI",
+    domain: "LLM",
     tags: ["ai_infrastructure", "energy_constraint"],
     entities: [{ name: "OpenAI", normalized: "openai", type: "company" }],
     articleIds: ["article-1", "article-2"],
@@ -65,7 +65,7 @@ describe("story cluster database helpers", () => {
           headline: "OpenAI expands AI infrastructure plans",
           summary: "OpenAI is adding data center capacity.",
           why_it_matters: ["Business impact", "Technical impact", "Watch capacity"],
-          domain: "AI",
+          domain: "LLM",
           tags: ["ai_infrastructure"],
           entities: [{ name: "OpenAI", normalized: "openai", type: "company" }],
           sources: ["Source A"],
@@ -80,7 +80,7 @@ describe("story cluster database helpers", () => {
     });
 
     const { getLatestStoryClusters } = await import("./db");
-    const clusters = await getLatestStoryClusters("AI", 10);
+    const clusters = await getLatestStoryClusters("LLM", 10);
 
     expect(clusters[0]?.articleIds).toEqual(["article-1"]);
     expect(clusters[0]?.whyItMatters).toHaveLength(3);
@@ -315,7 +315,7 @@ describe("story cluster database helpers", () => {
             {
               scenario_id: "scenario-ai-infra",
               consequences: ["Prioritize near-term review."],
-              domain_impacts: [{ domain: "AI", impact: "AI planning pressure." }],
+              domain_impacts: [{ domain: "LLM", impact: "AI planning pressure." }],
               created_at: "2026-04-21T12:00:00.000Z",
             },
           ],
@@ -361,7 +361,7 @@ describe("story cluster database helpers", () => {
       {
         scenarioId: "scenario-ai-infra",
         consequences: ["Prioritize near-term review."],
-        domainImpacts: [{ domain: "AI", impact: "AI planning pressure." }],
+        domainImpacts: [{ domain: "LLM", impact: "AI planning pressure." }],
       },
     ]);
     await saveWatchItems([
@@ -383,7 +383,7 @@ describe("story cluster database helpers", () => {
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS implications");
     expect(sql).toContain("CREATE TABLE IF NOT EXISTS watch_items");
     expect(scenarios[0]?.likelihood).toBe("high");
-    expect(implications[0]?.domainImpacts[0]?.domain).toBe("AI");
+    expect(implications[0]?.domainImpacts[0]?.domain).toBe("LLM");
     expect(watchItems[0]?.indicators).toContain("week-over-week trend velocity");
   });
 

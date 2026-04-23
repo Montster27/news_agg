@@ -7,7 +7,9 @@ export const dynamic = "force-dynamic";
 
 const domains: Array<ArticleDomain | "All"> = [
   "All",
-  "AI",
+  "AIUse",
+  "LLM",
+  "AIInfra",
   "Semis",
   "Cloud",
   "Security",

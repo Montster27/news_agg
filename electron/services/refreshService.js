@@ -1,3 +1,12 @@
+// /Users/montysharma/Documents/news_agg/news_agg/electron/services/refreshService.js
+//
+// Key changes from original:
+//   - MAX_ARTICLES_PER_SOURCE: 5 → 20
+//   - Total article cap: 60 → 500
+//   - Added full-text extraction via articleExtractor
+//   - Added AI enrichment via aiEnrichment (falls back to heuristics)
+//   - resetAiStatus() called each refresh cycle so AI re-checks availability
+
 const Parser = require("rss-parser");
 const { upsertArticles, getArticles } = require("../repositories/articlesRepo");
 const {
@@ -18,13 +27,20 @@ const {
 } = require("../repositories/preferencesRepo");
 const { createResourceMonitor } = require("./resourceMonitor");
 const { sources } = require("./sources");
+const { enrichArticlesWithFullText } = require("./articleExtractor");
+const { enrichArticlesWithAI, resetAiStatus } = require("./aiEnrichment");
 
 const parser = new Parser();
-const MAX_ARTICLES_PER_SOURCE = 5;
+const MAX_ARTICLES_PER_SOURCE = 20;
+const MAX_TOTAL_ARTICLES = 500;
 const MAX_FEED_BYTES = 1_500_000;
 const MAX_CONCURRENT_FEEDS = 3;
 const FEED_BATCH_PAUSE_MS = 150;
 const MEMORY_COOLDOWN_PAUSE_MS = 750;
+
+// How many articles to attempt full-text extraction on per refresh
+// (prioritize newest/highest-importance first)
+const MAX_EXTRACTION_ARTICLES = 80;
 
 const HTML_ENTITIES = {
   "&amp;": "&",
@@ -149,26 +165,33 @@ async function readResponseTextWithLimit(response, maxBytes = MAX_FEED_BYTES) {
 function inferTags(text) {
   const normalized = text.toLowerCase();
   const keywords = [
-    ["ai_infrastructure", ["ai infrastructure", "inference", "model", "gpu cluster"]],
-    ["chips", ["semiconductor", "chip", "gpu", "memory", "wafer"]],
-    ["energy_constraint", ["power", "energy", "grid", "electricity"]],
-    ["data_centers", ["data center", "datacenter", "cloud infrastructure"]],
-    ["frontier_models", ["frontier model", "reasoning model", "agent"]],
-    ["robotics", ["robot", "robotics", "automation"]],
-    ["biotech", ["biotech", "biology", "drug discovery", "genomics"]],
-    ["security", ["security", "cyber", "vulnerability"]],
-    ["regulation", ["regulation", "policy", "antitrust", "lawmakers"]],
+    ["ai_infrastructure", ["ai infrastructure", "inference", "model serving", "gpu cluster", "training run"]],
+    ["chips", ["semiconductor", "chip", "gpu", "memory chip", "wafer", "fab", "foundry", "tsmc", "asml"]],
+    ["energy_constraint", ["power grid", "energy demand", "electricity", "nuclear power", "power plant"]],
+    ["data_centers", ["data center", "datacenter", "cloud infrastructure", "server farm", "hyperscaler"]],
+    ["frontier_models", ["frontier model", "reasoning model", "agent", "gpt-5", "claude", "gemini", "llama"]],
+    ["robotics", ["robot", "robotics", "humanoid", "automation", "autonomous"]],
+    ["biotech", ["biotech", "biology", "drug discovery", "genomics", "crispr", "mrna"]],
+    ["security", ["security", "cyber", "vulnerability", "breach", "ransomware", "exploit", "zero-day"]],
+    ["regulation", ["regulation", "policy", "antitrust", "lawmakers", "ftc", "doj", "eu commission"]],
+    ["open_source", ["open source", "open-source", "apache license", "mit license"]],
+    ["autonomous_vehicles", ["self-driving", "autonomous vehicle", "waymo", "cruise"]],
+    ["quantum", ["quantum computer", "quantum computing", "qubit"]],
+    ["funding", ["raised", "funding round", "series a", "series b", "ipo", "valuation"]],
+    ["acquisition", ["acquisition", "acquired", "merger", "takeover", "buys"]],
+    ["supply_chain", ["supply chain", "shortage", "tariff", "export ban", "trade war"]],
+    ["developer_tools", ["developer tool", "api", "sdk", "devops", "cicd", "platform"]],
   ];
   const tags = keywords
     .filter(([, needles]) => needles.some((needle) => normalized.includes(needle)))
     .map(([tag]) => tag);
 
-  return tags.length ? tags : ["tech_monitoring"];
+  return tags.length ? tags.slice(0, 4) : ["tech_monitoring"];
 }
 
 function scoreArticle(article, preferences) {
   const preferredTags = preferences.preferredTags ?? ["ai_infrastructure", "energy_constraint"];
-  const preferredDomains = preferences.preferredDomains ?? ["AI", "Chips"];
+  const preferredDomains = preferences.preferredDomains ?? ["LLM", "AIInfra", "Semis"];
   const tagBoost = article.tags.filter((tag) => preferredTags.includes(tag)).length * 1.2;
   const domainBoost = preferredDomains.includes(article.domain) ? 1 : 0;
   return Number((article.importance + tagBoost + domainBoost).toFixed(2));
@@ -178,11 +201,11 @@ function inferImportance(article) {
   const text = `${article.headline} ${article.summary}`.toLowerCase();
   let importance = 3;
 
-  if (/(breakthrough|launches|raises|lawsuit|ban|shutdown|shortage|security|vulnerability|earnings|acquisition)/.test(text)) {
+  if (/(breakthrough|launches|raises|lawsuit|ban|shutdown|shortage|security|vulnerability|earnings|acquisition|billions|partnership)/.test(text)) {
     importance += 1;
   }
 
-  if (/(openai|nvidia|google|microsoft|apple|meta|amazon|tsmc|asml|deepmind)/.test(text)) {
+  if (/(openai|nvidia|google|microsoft|apple|meta|amazon|tsmc|asml|deepmind|anthropic|broadcom|intel|arm|samsung|qualcomm)/.test(text)) {
     importance += 1;
   }
 
@@ -437,14 +460,18 @@ function createRefreshService({
         return nextResult;
       }
 
+      // ── Reset AI status so it re-checks availability each cycle ──
+      resetAiStatus();
+
       const preferences = getPreferences(db);
       const settled = await (fetchAllFeedsOverride ?? fetchAllFeeds)(preferences, {
         resourceMonitor,
       });
       memoryBreaks += Number(settled.memoryBreaks ?? 0);
-      const articles = dedupeByUrl(settled.flatMap((result) => result.articles))
+
+      let articles = dedupeByUrl(settled.flatMap((result) => result.articles))
         .sort((left, right) => new Date(right.published_at).getTime() - new Date(left.published_at).getTime())
-        .slice(0, 60);
+        .slice(0, MAX_TOTAL_ARTICLES);
       const errors = settled.map((result) => result.error).filter(Boolean);
 
       if (!articles.length && errors.length) {
@@ -459,6 +486,29 @@ function createRefreshService({
         });
       }
 
+      // ── Phase 2: Full-text extraction on top articles ──
+      const sortedForExtraction = [...articles]
+        .sort((a, b) => (b.importance - a.importance) || (new Date(b.published_at).getTime() - new Date(a.published_at).getTime()));
+      const toExtract = sortedForExtraction.slice(0, MAX_EXTRACTION_ARTICLES);
+      const skipExtract = sortedForExtraction.slice(MAX_EXTRACTION_ARTICLES);
+
+      try {
+        const extracted = await enrichArticlesWithFullText(toExtract);
+        articles = [...extracted, ...skipExtract];
+        console.log(`[refresh] Full-text extraction completed for ${toExtract.length} articles`);
+      } catch (extractError) {
+        console.warn(`[refresh] Full-text extraction failed: ${extractError instanceof Error ? extractError.message : "Unknown"}`);
+      }
+
+      // ── Phase 3: AI enrichment (domain, tags, importance, summary) ──
+      try {
+        articles = await enrichArticlesWithAI(articles);
+        console.log(`[refresh] AI enrichment completed`);
+      } catch (aiError) {
+        console.warn(`[refresh] AI enrichment failed: ${aiError instanceof Error ? aiError.message : "Unknown"}`);
+      }
+
+      // ── Phase 4: Save and generate patterns/briefs ──
       const result = upsertArticles(db, articles);
       const latestArticles = getArticles(db, { limit: 500 });
       const patterns = getPatterns(db, { limit: 500 });
@@ -488,11 +538,11 @@ function createRefreshService({
         incoming: articles.length,
         notificationCount,
         fetchedAt: refreshedAt,
-          warning: errors.length ? errors.slice(0, 3).join("; ") : undefined,
-          memoryBreaks,
-          memory: memoryState?.constrained ? memoryState : undefined,
-          manual: Boolean(options.manual),
-        });
+        warning: errors.length ? errors.slice(0, 3).join("; ") : undefined,
+        memoryBreaks,
+        memory: memoryState?.constrained ? memoryState : undefined,
+        manual: Boolean(options.manual),
+      });
     })();
 
     try {

@@ -11,7 +11,7 @@ function article(overrides: Partial<Article> = {}): Article {
     date: "2026-04-20",
     processed_at: "2026-04-20T12:00:00.000Z",
     week: "2026-17",
-    domain: "AI",
+    domain: "LLM",
     headline: "OpenAI expands data center infrastructure for inference demand",
     summary: "OpenAI is adding infrastructure capacity as inference demand grows.",
     source: "Source A",

@@ -1,3 +1,11 @@
+// /Users/montysharma/Documents/news_agg/news_agg/lib/ingest.ts
+//
+// Key changes:
+//   - MAX_ARTICLES_PER_SOURCE: 5 → 20
+//   - MAX_DASHBOARD_ARTICLES: 30 → 300
+//   - Cache duration: 1 hour → 30 minutes
+//   - Summary length: 280 → 600 chars
+
 import { processArticlesInBatches } from "@/lib/ai";
 import { clusterArticles, deduplicateArticles } from "@/lib/clustering";
 import { saveArticlesToDb, saveStoryClustersToDb } from "@/lib/db";
@@ -8,9 +16,9 @@ import { Article, StoryCluster } from "@/lib/types";
 import { synthesizeWhyItMatters } from "@/lib/story-synthesis";
 
 const parser = new Parser();
-const ONE_HOUR = 60 * 60 * 1000;
-const MAX_ARTICLES_PER_SOURCE = 5;
-const MAX_DASHBOARD_ARTICLES = 30;
+const THIRTY_MINUTES = 30 * 60 * 1000;
+const MAX_ARTICLES_PER_SOURCE = 20;
+const MAX_DASHBOARD_ARTICLES = 300;
 const MAX_CONCURRENT_FEEDS = 3;
 const MAX_FEED_BYTES = 1_500_000;
 const FEED_BATCH_PAUSE_MS = 150;
@@ -50,7 +58,7 @@ function createSummary(item: {
     return "Summary unavailable for this feed item.";
   }
 
-  return cleaned.slice(0, 280);
+  return cleaned.slice(0, 600);
 }
 
 function sleep(ms: number) {
@@ -212,7 +220,7 @@ async function refreshFeeds() {
 export async function ingestFeeds() {
   if (
     articleCache &&
-    Date.now() - new Date(articleCache.fetchedAt).getTime() < ONE_HOUR
+    Date.now() - new Date(articleCache.fetchedAt).getTime() < THIRTY_MINUTES
   ) {
     return articleCache;
   }

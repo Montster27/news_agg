@@ -14,7 +14,7 @@ function cluster(overrides: Partial<StoryCluster> = {}): StoryCluster {
     headline: "OpenAI expands AI infrastructure",
     summary: "OpenAI is adding data center capacity.",
     whyItMatters: ["Business", "Technical", "Watch"],
-    domain: "AI",
+    domain: "LLM",
     tags: ["ai_infrastructure", "energy_constraint"],
     entities: [{ name: "OpenAI", normalized: "openai", type: "company" }],
     articleIds: ["article-1"],

@@ -71,7 +71,11 @@ describe("strategic intelligence layer", () => {
     expect(implication.scenarioId).toBe(scenario.id);
     expect(implication.consequences).toHaveLength(3);
     expect(implication.consequences[0]).toContain("Prioritize");
-    expect(implication.domainImpacts.some((impact) => impact.domain === "AI")).toBe(true);
+    expect(
+      implication.domainImpacts.some(
+        (impact) => impact.domain === "LLM" || impact.domain === "AIInfra" || impact.domain === "AIUse",
+      ),
+    ).toBe(true);
   });
 
   it("creates measurable watch signals from scenario drivers", () => {

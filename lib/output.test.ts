@@ -9,7 +9,7 @@ function cluster(overrides: Partial<StoryCluster> = {}): StoryCluster {
     headline: "OpenAI expands AI infrastructure plans",
     summary: "OpenAI is adding data center capacity as model demand rises.",
     whyItMatters: ["Capacity is becoming a planning constraint."],
-    domain: "AI",
+    domain: "LLM",
     tags: ["ai_infrastructure", "energy_constraint"],
     entities: [{ name: "OpenAI", normalized: "openai", type: "company" }],
     articleIds: ["article-1"],
@@ -80,7 +80,7 @@ function outputData(): OutputEngineData {
       {
         scenarioId: "scenario-ai-infra",
         consequences: ["Prioritize near-term review of capacity-exposed decisions."],
-        domainImpacts: [{ domain: "AI", impact: "AI planning pressure." }],
+        domainImpacts: [{ domain: "LLM", impact: "AI planning pressure." }],
       },
     ],
     watchItems: [

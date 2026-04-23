@@ -17,6 +17,7 @@ import {
 import { updateAffinitiesFromFeedback } from "@/lib/affinity";
 import { AppShell } from "@/components/AppShell";
 import { DesktopControls } from "@/components/DesktopControls";
+import { ArticleFeed } from "@/components/ArticleFeed";
 import { DomainBreadthView } from "@/components/DomainBreadthView";
 import { FiltersBar } from "@/components/FiltersBar";
 import { KPIStrip, type KPITile } from "@/components/KPIStrip";
@@ -84,7 +85,7 @@ const TrendsPanel = dynamic(
   },
 );
 
-const DESKTOP_ARTICLE_LIMIT = 200;
+const DESKTOP_ARTICLE_LIMIT = 500;
 const CLUSTER_INPUT_LIMIT = 120;
 const MEGA_STORY_LIMIT = 3;
 
@@ -1259,6 +1260,18 @@ export function CommandCenterClient({
               onClusterViewed={markClusterViewed}
               onDomainViewed={markDomainViewed}
               onDomainCollapsed={setDomainCollapsedState}
+            />
+
+            <ArticleFeed
+              articles={sortedArticles}
+              activeTags={activeTags}
+              personalizedView={personalizedView}
+              scoreLookup={scoreLookup}
+              feedbackMap={feedbackMap}
+              learningProfile={learningProfile}
+              onTagClick={toggleTag}
+              onImportanceChange={handleImportanceChange}
+              onImportanceReset={handleImportanceReset}
             />
 
             <OutputGenerationPanel data={outputData} />

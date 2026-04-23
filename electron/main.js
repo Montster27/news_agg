@@ -305,7 +305,13 @@ async function createWindow() {
     mainWindow = null;
   });
 
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    // Open external links in the user's default browser
+    if (url.startsWith("http:") || url.startsWith("https:")) {
+      shell.openExternal(url);
+    }
+    return { action: "deny" };
+  });
   mainWindow.webContents.on("will-navigate", (event, navigationUrl) => {
     if (!isLocalHttpUrl(navigationUrl) && !navigationUrl.startsWith("file:")) {
       event.preventDefault();

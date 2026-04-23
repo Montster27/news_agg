@@ -5,7 +5,9 @@ import { generateWhyItMatters } from "@/lib/why-it-matters";
 import { Article, ArticleDomain } from "@/lib/types";
 
 const domains: ArticleDomain[] = [
-  "AI",
+  "AIUse",
+  "LLM",
+  "AIInfra",
   "Semis",
   "Cloud",
   "Security",

@@ -1,3 +1,5 @@
+// /Users/montysharma/Documents/news_agg/news_agg/electron/services/scheduler.js
+
 function createScheduler({ refreshService, getIntervalMinutes }) {
   let timer = null;
 
@@ -10,7 +12,7 @@ function createScheduler({ refreshService, getIntervalMinutes }) {
 
   function start() {
     stop();
-    const intervalMinutes = Math.max(5, Number(getIntervalMinutes?.() ?? 30));
+    const intervalMinutes = Math.max(5, Number(getIntervalMinutes?.() ?? 15));
     timer = setInterval(() => {
       void refreshService.runRefresh({ scheduled: true });
     }, intervalMinutes * 60 * 1000);

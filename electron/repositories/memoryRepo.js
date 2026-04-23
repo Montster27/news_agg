@@ -2,7 +2,9 @@ const MAX_CLUSTER_HISTORY = 50;
 const MAX_THREADS = 100;
 
 const ALLOWED_DOMAINS = new Set([
-  "AI",
+  "AIUse",
+  "LLM",
+  "AIInfra",
   "Semis",
   "Cloud",
   "Security",

@@ -52,7 +52,7 @@ function sampleArticle(overrides = {}) {
     id: "article-1",
     headline: "OpenAI expands AI infrastructure plans",
     summary: "A new data center plan puts power and chips back in focus.",
-    domain: "AI",
+    domain: "LLM",
     source: "Test Source",
     url: "https://example.com/openai-infra",
     importance: 5,
@@ -190,7 +190,7 @@ describe("Electron Phase 2 local data layer", () => {
       sampleArticle({
         id: "self-secondary",
         url: "https://example.com/self",
-        domain: "AI",
+        domain: "LLM",
         domainSecondary: ["AI", "Semis"],
       }),
     ]);
@@ -582,7 +582,7 @@ describe("Electron Phase 2 local data layer", () => {
         id: "article-2",
         headline: "Power constraints shape AI infrastructure buildouts",
         summary: "Data center operators are prioritizing grid access.",
-        domain: "AI",
+        domain: "LLM",
         source: "Infra Wire",
         url: "https://example.com/related",
         importance: 4,

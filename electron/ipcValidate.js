@@ -94,11 +94,15 @@ function sanitizeSavedSearchId(value) {
 
 function sanitizeImportanceFeedback(input) {
   const src = pickObject(input);
-  return {
+  const result = {
     articleId: sanitizeArticleId(src.articleId),
     originalImportance: clampNumber(src.originalImportance, { min: 1, max: 5 }),
     userImportance: clampNumber(src.userImportance, { min: 1, max: 5 }),
   };
+  if (src.reset === true) {
+    result.reset = true;
+  }
+  return result;
 }
 
 function sanitizeUserFeedback(input) {
@@ -111,7 +115,9 @@ function sanitizeUserFeedback(input) {
 }
 
 const ALLOWED_MEMORY_DOMAINS = new Set([
-  "AI",
+  "AIUse",
+  "LLM",
+  "AIInfra",
   "Semis",
   "Cloud",
   "Security",

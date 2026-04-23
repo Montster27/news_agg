@@ -1,7 +1,7 @@
 "use client";
 
 import { Tag } from "@/components/Tag";
-import { ArticleDomain } from "@/lib/types";
+import { ArticleDomain, DOMAIN_LABELS } from "@/lib/types";
 import { UserProfile } from "@/lib/user";
 
 type FiltersBarProps = {
@@ -32,7 +32,9 @@ const timeRanges: Array<{ label: string; value: "today" | "week" | "month" }> = 
 
 const domains: Array<"All" | ArticleDomain> = [
   "All",
-  "AI",
+  "AIUse",
+  "LLM",
+  "AIInfra",
   "Semis",
   "Cloud",
   "Security",
@@ -135,7 +137,7 @@ export function FiltersBar({
                       : "border border-slate-200 bg-slate-100 text-slate-700 hover:bg-slate-200"
                   }`}
                 >
-                  {domain}
+                  {domain === "All" ? "All" : DOMAIN_LABELS[domain] ?? domain}
                 </button>
               ))}
             </div>

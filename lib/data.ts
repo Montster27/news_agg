@@ -1,7 +1,9 @@
 import { Article, ArticleDomain } from "@/lib/types";
 
 export const dashboardGroups = [
-  { title: "AI", domains: ["AI"] },
+  { title: "AI Use", domains: ["AIUse"] },
+  { title: "LLM", domains: ["LLM"] },
+  { title: "AI Infra", domains: ["AIInfra"] },
   { title: "Semis", domains: ["Semis"] },
   { title: "Cloud", domains: ["Cloud"] },
   { title: "Security", domains: ["Security"] },

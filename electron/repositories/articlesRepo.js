@@ -2,7 +2,9 @@ const MAX_LIMIT = 1000;
 const { indexArticle } = require("./searchRepo");
 
 const ARTICLE_DOMAINS = [
-  "AI",
+  "AIUse",
+  "LLM",
+  "AIInfra",
   "Semis",
   "Cloud",
   "Security",
@@ -19,6 +21,7 @@ const ARTICLE_DOMAINS = [
 ];
 
 const LEGACY_DOMAIN_REMAP = {
+  AI: "LLM",
   Chips: "Semis",
   Infra: "Cloud",
   Energy: "Climate",

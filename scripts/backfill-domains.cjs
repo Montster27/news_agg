@@ -25,11 +25,12 @@ const BATCH_PAUSE_MS = 150;
 const TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS) || 180000;
 
 const ARTICLE_DOMAINS = [
-  "AI", "Semis", "Cloud", "Security", "Consumer", "Bio", "Climate",
-  "Crypto", "Policy", "Space", "Robotics", "Batteries", "AR", "General",
+  "AIUse", "LLM", "AIInfra", "Semis", "Cloud", "Security", "Consumer", "Bio",
+  "Climate", "Crypto", "Policy", "Space", "Robotics", "Batteries", "AR", "General",
 ];
 
 const LEGACY_DOMAIN_REMAP = {
+  AI: "LLM",
   Chips: "Semis",
   Infra: "Cloud",
   Energy: "Climate",

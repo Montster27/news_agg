@@ -24,7 +24,7 @@ function cluster(overrides: Partial<StoryCluster> = {}): StoryCluster {
     headline: "OpenAI expands AI infrastructure",
     summary: "OpenAI is adding data center capacity.",
     whyItMatters: ["Business", "Technical", "Watch"],
-    domain: "AI",
+    domain: "LLM",
     tags: ["ai_infrastructure", "energy_constraint"],
     entities: [{ name: "OpenAI", normalized: "openai", type: "company" }],
     articleIds: ["article-1"],
@@ -70,7 +70,7 @@ describe("personal intelligence layer", () => {
     expect(evaluateRules(cluster(), rules).adjustment).toBe(1);
     expect(applyRules(cluster(), rules)?.impactScore).toBe(7);
     expect(
-      applyRules(cluster(), [{ type: "filter", field: "domain", value: "AI", weight: 0 }]),
+      applyRules(cluster(), [{ type: "filter", field: "domain", value: "LLM", weight: 0 }]),
     ).toBeNull();
   });
 
