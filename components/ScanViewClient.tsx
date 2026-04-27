@@ -5,7 +5,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { ImportanceEditor } from "@/components/ImportanceEditor";
+import { RecallActionBar } from "@/components/RecallActionBar";
 import { Tag } from "@/components/Tag";
+import {
+  RECALL_IMPORT_URL,
+  buildBookmarksHtml,
+  buildExportFilename,
+} from "@/lib/recall";
 import {
   getLearnedAdjustment,
   getLearningExplanation,
@@ -112,6 +118,10 @@ export function ScanViewClient() {
     useState<ImportanceLearningProfile>(loadLearningProfile);
   const [loading, setLoading] = useState(true);
   const [domainFilter, setDomainFilter] = useState<ArticleDomain | "All">("All");
+  const [selectedRecallIds, setSelectedRecallIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [recallNotice, setRecallNotice] = useState<string | null>(null);
 
   // ── Load data ─────────────────────────────────────────────
   const loadData = useCallback(async () => {
@@ -219,6 +229,65 @@ export function ScanViewClient() {
       reset: true,
     });
   };
+
+  // ── Recall send handlers ──────────────────────────────────
+  const toggleRecallSelect = useCallback((articleId: string) => {
+    setSelectedRecallIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(articleId)) {
+        next.delete(articleId);
+      } else {
+        next.add(articleId);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearRecallSelect = useCallback(() => {
+    setSelectedRecallIds(() => new Set());
+  }, []);
+
+  const handleSendToRecall = useCallback(async () => {
+    if (selectedRecallIds.size === 0) return;
+    const articleMap = new Map(articles.map((article) => [article.id, article]));
+    const selectedArticles = Array.from(selectedRecallIds)
+      .map((id) => articleMap.get(id))
+      .filter((article): article is Article => Boolean(article && article.url));
+
+    if (selectedArticles.length === 0) {
+      setRecallNotice("No selected articles have URLs to export.");
+      return;
+    }
+
+    const now = new Date();
+    const html = buildBookmarksHtml(selectedArticles, now);
+    const filename = buildExportFilename(now);
+
+    const desktopExport = window.desktop?.exports?.exportRecallBookmarks;
+    if (typeof desktopExport === "function") {
+      const result = await desktopExport({ html, filename });
+      if (!result.success) {
+        setRecallNotice(result.error ?? "Export canceled.");
+        return;
+      }
+    } else {
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    }
+
+    setRecallNotice(
+      `Saved ${selectedArticles.length} URLs. In Recall: Add Content → Import → Import Bookmarks → choose this file.`,
+    );
+    window.open(RECALL_IMPORT_URL, "_blank", "noopener,noreferrer");
+    clearRecallSelect();
+  }, [articles, clearRecallSelect, selectedRecallIds]);
 
   // ── Active domains for filter pills ───────────────────────
   const activeDomains = useMemo(
@@ -372,11 +441,23 @@ export function ScanViewClient() {
           <section className="surface-card divide-y divide-slate-100 p-0">
             {visibleHeadlines.map((article) => {
               const feedback = feedbackMap[article.id];
+              const isSelected = selectedRecallIds.has(article.id);
               return (
                 <div
                   key={article.id}
-                  className="group flex items-center gap-3 px-4 py-2 hover:bg-slate-50"
+                  className={`group flex items-center gap-3 px-4 py-2 hover:bg-slate-50 ${
+                    isSelected ? "bg-sky-50/60" : ""
+                  }`}
                 >
+                  {/* Recall select */}
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleRecallSelect(article.id)}
+                    aria-label={`Select article: ${article.headline}`}
+                    className="h-4 w-4 shrink-0 cursor-pointer accent-sky-600"
+                  />
+
                   {/* Domain badge */}
                   <span
                     className={`hidden shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold sm:inline-block ${
@@ -452,6 +533,26 @@ export function ScanViewClient() {
           </section>
         ) : null}
       </div>
+      {recallNotice ? (
+        <div
+          role="status"
+          className="fixed bottom-24 left-1/2 z-40 -translate-x-1/2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-lg"
+        >
+          {recallNotice}
+          <button
+            type="button"
+            onClick={() => setRecallNotice(null)}
+            className="ml-3 text-xs font-medium text-sky-700 hover:underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+      <RecallActionBar
+        selectedCount={selectedRecallIds.size}
+        onClear={clearRecallSelect}
+        onSend={handleSendToRecall}
+      />
     </AppShell>
   );
 }
