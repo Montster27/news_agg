@@ -21,12 +21,14 @@ type ArticleFeedProps = {
   scoreLookup?: Map<string, number>;
   feedbackMap?: Record<string, ImportanceFeedback>;
   learningProfile?: ImportanceLearningProfile;
+  selectedIds?: Set<string>;
   onTagClick: (tag: string) => void;
   onImportanceChange: (
     article: Article,
     userImportance: 1 | 2 | 3 | 4 | 5,
   ) => void;
   onImportanceReset: (article: Article) => void;
+  onToggleSelect?: (articleId: string) => void;
 };
 
 export function ArticleFeed({
@@ -36,10 +38,13 @@ export function ArticleFeed({
   scoreLookup,
   feedbackMap = {},
   learningProfile,
+  selectedIds,
   onTagClick,
   onImportanceChange,
   onImportanceReset,
+  onToggleSelect,
 }: ArticleFeedProps) {
+  const selectable = typeof onToggleSelect === "function";
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
@@ -86,13 +91,26 @@ export function ArticleFeed({
             ? scoreLookup?.get(article.id)
             : undefined;
 
+          const isSelected = selectedIds?.has(article.id) ?? false;
+
           return (
             <div
               key={article.id}
-              className="group py-3 first:pt-0 last:pb-0"
+              className={`group py-3 first:pt-0 last:pb-0 ${
+                isSelected ? "rounded-lg bg-sky-50/60 px-2 -mx-2" : ""
+              }`}
             >
               {/* Row 1: metadata + importance */}
               <div className="flex items-start gap-3">
+                {selectable ? (
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => onToggleSelect?.(article.id)}
+                    aria-label={`Select article: ${article.headline}`}
+                    className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-sky-600"
+                  />
+                ) : null}
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
                     <span className="rounded bg-slate-100 px-1.5 py-0.5 font-medium text-slate-700">

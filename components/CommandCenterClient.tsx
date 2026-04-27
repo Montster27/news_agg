@@ -23,7 +23,13 @@ import { FiltersBar } from "@/components/FiltersBar";
 import { KPIStrip, type KPITile } from "@/components/KPIStrip";
 import { MegaStoryStrip } from "@/components/MegaStoryStrip";
 import { OutputGenerationPanel } from "@/components/OutputGenerationPanel";
+import { RecallActionBar } from "@/components/RecallActionBar";
 import { SearchCommandPanel } from "@/components/SearchCommandPanel";
+import {
+  RECALL_IMPORT_URL,
+  buildBookmarksHtml,
+  buildExportFilename,
+} from "@/lib/recall";
 import { extractEntities, mergeEntities } from "@/lib/entities";
 import { buildNarrativeThreads } from "@/lib/narratives";
 import { computeConnections } from "@/lib/connections";
@@ -354,6 +360,10 @@ export function CommandCenterClient({
   const [learningProfile, setLearningProfile] =
     useState<ImportanceLearningProfile>(loadLearningProfile);
   const [memoryState, setMemoryState] = useState<MemoryState>(EMPTY_MEMORY_STATE);
+  const [selectedRecallIds, setSelectedRecallIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [recallNotice, setRecallNotice] = useState<string | null>(null);
 
   const loadDesktopData = useCallback(async () => {
     if (!window.desktop) {
@@ -1001,6 +1011,64 @@ export function CommandCenterClient({
     );
   };
 
+  const toggleRecallSelect = useCallback((articleId: string) => {
+    setSelectedRecallIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(articleId)) {
+        next.delete(articleId);
+      } else {
+        next.add(articleId);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearRecallSelect = useCallback(() => {
+    setSelectedRecallIds(() => new Set());
+  }, []);
+
+  const handleSendToRecall = useCallback(async () => {
+    if (selectedRecallIds.size === 0) return;
+    const articleMap = new Map(articles.map((article) => [article.id, article]));
+    const selectedArticles = Array.from(selectedRecallIds)
+      .map((id) => articleMap.get(id))
+      .filter((article): article is Article => Boolean(article && article.url));
+
+    if (selectedArticles.length === 0) {
+      setRecallNotice("No selected articles have URLs to export.");
+      return;
+    }
+
+    const now = new Date();
+    const html = buildBookmarksHtml(selectedArticles, now);
+    const filename = buildExportFilename(now);
+
+    const desktopExport = window.desktop?.exports?.exportRecallBookmarks;
+    if (typeof desktopExport === "function") {
+      const result = await desktopExport({ html, filename });
+      if (!result.success) {
+        setRecallNotice(result.error ?? "Export canceled.");
+        return;
+      }
+    } else {
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    }
+
+    setRecallNotice(
+      `Saved ${selectedArticles.length} URLs. In Recall: Add Content → Import → Import Bookmarks → choose this file.`,
+    );
+    window.open(RECALL_IMPORT_URL, "_blank", "noopener,noreferrer");
+    clearRecallSelect();
+  }, [articles, clearRecallSelect, selectedRecallIds]);
+
   const handleShiftClick = (text: string) => {
     const related = inferRelatedTag(text, availableTags) ??
       inferRelatedTag(text, profile.preferred_tags);
@@ -1269,9 +1337,11 @@ export function CommandCenterClient({
               scoreLookup={scoreLookup}
               feedbackMap={feedbackMap}
               learningProfile={learningProfile}
+              selectedIds={selectedRecallIds}
               onTagClick={toggleTag}
               onImportanceChange={handleImportanceChange}
               onImportanceReset={handleImportanceReset}
+              onToggleSelect={toggleRecallSelect}
             />
 
             <OutputGenerationPanel data={outputData} />
@@ -1294,6 +1364,26 @@ export function CommandCenterClient({
           </section>
         )}
       </div>
+      {recallNotice ? (
+        <div
+          role="status"
+          className="fixed bottom-24 left-1/2 z-40 -translate-x-1/2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-lg"
+        >
+          {recallNotice}
+          <button
+            type="button"
+            onClick={() => setRecallNotice(null)}
+            className="ml-3 text-xs font-medium text-sky-700 hover:underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+      <RecallActionBar
+        selectedCount={selectedRecallIds.size}
+        onClear={clearRecallSelect}
+        onSend={handleSendToRecall}
+      />
     </AppShell>
   );
 }
