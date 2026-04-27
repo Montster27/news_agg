@@ -242,6 +242,10 @@ declare global {
       };
       exports: {
         exportJson: () => Promise<DesktopOperationResult>;
+        exportRecallBookmarks: (payload: {
+          html: string;
+          filename: string;
+        }) => Promise<DesktopOperationResult>;
         getSnapshot: () => Promise<unknown>;
       };
       search: {

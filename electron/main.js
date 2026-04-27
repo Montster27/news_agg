@@ -158,6 +158,32 @@ async function exportSnapshotDialog(parentWindow) {
   return exportSnapshot(desktopDb, result.filePath);
 }
 
+async function exportRecallBookmarksDialog(parentWindow, payload) {
+  const html = typeof payload?.html === "string" ? payload.html : "";
+  const requestedFilename =
+    typeof payload?.filename === "string" ? payload.filename : "";
+  const safeFilename = /^[\w.\-]+\.html?$/i.test(requestedFilename)
+    ? requestedFilename
+    : `news_agg-recall-${new Date().toISOString().slice(0, 10)}.html`;
+
+  if (!html) {
+    return { success: false, error: "Empty bookmark payload" };
+  }
+
+  const result = await dialog.showSaveDialog(parentWindow, {
+    title: "Send Articles to Recall",
+    defaultPath: path.join(app.getPath("documents"), safeFilename),
+    filters: [{ name: "Bookmark HTML", extensions: ["html"] }],
+  });
+
+  if (result.canceled || !result.filePath) {
+    return { success: false, error: "Export canceled" };
+  }
+
+  await fs.writeFile(result.filePath, html, "utf8");
+  return { success: true, path: result.filePath };
+}
+
 async function importSnapshotDialog(parentWindow) {
   const result = await dialog.showOpenDialog(parentWindow, {
     title: "Import Local Data",
@@ -472,6 +498,18 @@ ipcMain.handle("desktop:exports:exportJson", async (event) => {
     error: error instanceof Error ? error.message : "Unknown export error",
   }));
 });
+
+ipcMain.handle(
+  "desktop:exports:exportRecallBookmarks",
+  async (event, payload) => {
+    const parentWindow =
+      BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    return exportRecallBookmarksDialog(parentWindow, payload).catch((error) => ({
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown export error",
+    }));
+  },
+);
 
 ipcMain.handle("desktop:exports:getSnapshot", () => createSnapshot(desktopDb));
 

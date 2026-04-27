@@ -22,6 +22,9 @@ type ArticleCardProps = {
     userImportance: 1 | 2 | 3 | 4 | 5,
   ) => void;
   onImportanceReset?: (article: Article) => void;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (articleId: string) => void;
 };
 
 export function ArticleCard({
@@ -34,6 +37,9 @@ export function ArticleCard({
   onClusterFeedback,
   onImportanceChange,
   onImportanceReset,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
 }: ArticleCardProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -177,20 +183,37 @@ export function ArticleCard({
     return null;
   }
 
+  const articleId = article.id;
+
   return (
     <article
       className={`rounded-2xl border bg-white p-5 shadow-panel ${
-        isHighlighted ? "border-accent/40" : "border-line"
+        selected
+          ? "border-accent ring-2 ring-accent/40"
+          : isHighlighted
+            ? "border-accent/40"
+            : "border-line"
       }`}
     >
       <div className="flex items-start justify-between gap-4">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
-            <span>{article.domain}</span>
-            {article.source ? <span>{article.source}</span> : null}
-            <span>{article.date}</span>
+        <div className="flex items-start gap-3">
+          {selectable ? (
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => onToggleSelect?.(articleId)}
+              aria-label={`Select article: ${article.headline}`}
+              className="mt-1 h-4 w-4 cursor-pointer accent-accent"
+            />
+          ) : null}
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+              <span>{article.domain}</span>
+              {article.source ? <span>{article.source}</span> : null}
+              <span>{article.date}</span>
+            </div>
+            <h3 className="text-lg font-semibold text-ink">{article.headline}</h3>
           </div>
-          <h3 className="text-lg font-semibold text-ink">{article.headline}</h3>
         </div>
         <ImportanceEditor
           article={article}

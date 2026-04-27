@@ -44,6 +44,8 @@ contextBridge.exposeInMainWorld("desktop", {
   },
   exports: {
     exportJson: () => ipcRenderer.invoke("desktop:exports:exportJson"),
+    exportRecallBookmarks: (payload) =>
+      ipcRenderer.invoke("desktop:exports:exportRecallBookmarks", payload),
     getSnapshot: () => ipcRenderer.invoke("desktop:exports:getSnapshot"),
   },
   search: {

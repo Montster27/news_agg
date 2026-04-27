@@ -1,9 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArticleCard } from "@/components/ArticleCard";
+import { RecallActionBar } from "@/components/RecallActionBar";
 import { dashboardGroups } from "@/lib/data";
+import {
+  RECALL_IMPORT_URL,
+  buildBookmarksHtml,
+  buildExportFilename,
+} from "@/lib/recall";
 import { Article, StoryCluster } from "@/lib/types";
 
 type RssResponse = {
@@ -22,6 +28,8 @@ export function DashboardClient() {
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [recallNotice, setRecallNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -141,6 +149,67 @@ export function DashboardClient() {
         : [...current, tag],
     );
   };
+
+  const toggleSelect = useCallback((articleId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(articleId)) {
+        next.delete(articleId);
+      } else {
+        next.add(articleId);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearSelect = useCallback(() => {
+    setSelectedIds(() => new Set());
+  }, []);
+
+  const handleSendToRecall = useCallback(async () => {
+    if (selectedIds.size === 0) return;
+    const articleMap = new Map(articles.map((article) => [article.id, article]));
+    const selectedArticles = Array.from(selectedIds)
+      .map((id) => articleMap.get(id))
+      .filter((article): article is Article => Boolean(article && article.url));
+
+    if (selectedArticles.length === 0) {
+      setRecallNotice("No selected articles have URLs to export.");
+      return;
+    }
+
+    const now = new Date();
+    const html = buildBookmarksHtml(selectedArticles, now);
+    const filename = buildExportFilename(now);
+
+    const desktopExport = window.desktop?.exports?.exportRecallBookmarks;
+    if (typeof desktopExport === "function") {
+      const result = await desktopExport({ html, filename });
+      if (!result.success) {
+        setRecallNotice(result.error ?? "Export canceled.");
+        return;
+      }
+      setRecallNotice(
+        `Saved ${selectedArticles.length} URLs. In Recall: Add Content → Import → Import Bookmarks → choose this file.`,
+      );
+    } else {
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+      setRecallNotice(
+        `Saved ${selectedArticles.length} URLs. In Recall: Add Content → Import → Import Bookmarks → choose this file.`,
+      );
+    }
+
+    window.open(RECALL_IMPORT_URL, "_blank", "noopener,noreferrer");
+    clearSelect();
+  }, [articles, clearSelect, selectedIds]);
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-10">
@@ -294,6 +363,9 @@ export function DashboardClient() {
                     article={article}
                     activeTags={activeTags}
                     onTagClick={toggleTag}
+                    selectable={true}
+                    selected={selectedIds.has(article.id)}
+                    onToggleSelect={toggleSelect}
                   />
                 ))}
               </div>
@@ -322,6 +394,9 @@ export function DashboardClient() {
                           article={article}
                           activeTags={activeTags}
                           onTagClick={toggleTag}
+                          selectable={true}
+                          selected={selectedIds.has(article.id)}
+                          onToggleSelect={toggleSelect}
                         />
                       ))}
                     </div>
@@ -336,6 +411,28 @@ export function DashboardClient() {
           </section>
         </>
       ) : null}
+
+      {recallNotice ? (
+        <div
+          role="status"
+          className="fixed bottom-24 left-1/2 z-40 -translate-x-1/2 rounded-2xl border border-line bg-white px-4 py-3 text-sm text-slate-700 shadow-panel"
+        >
+          {recallNotice}
+          <button
+            type="button"
+            onClick={() => setRecallNotice(null)}
+            className="ml-3 text-xs font-medium text-accent"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
+      <RecallActionBar
+        selectedCount={selectedIds.size}
+        onClear={clearSelect}
+        onSend={handleSendToRecall}
+      />
     </main>
   );
 }
