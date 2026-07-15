@@ -144,6 +144,8 @@ function sanitizeMemoryDomain(value) {
   return s && ALLOWED_MEMORY_DOMAINS.has(s) ? s : undefined;
 }
 
+const MEMORY_DOMAINS = Array.from(ALLOWED_MEMORY_DOMAINS);
+
 function sanitizeClusterIdValue(value) {
   return clampString(value, 256);
 }
@@ -242,6 +244,75 @@ function sanitizePreferences(input) {
     notificationsEnabled:
       typeof src.notificationsEnabled === "boolean" ? src.notificationsEnabled : undefined,
     sources: clampStringArray(src.sources, 500),
+    notificationImportanceThreshold: clampNumber(src.notificationImportanceThreshold, {
+      min: 1,
+      max: 5,
+    }),
+    personalizedDefault:
+      typeof src.personalizedDefault === "boolean" ? src.personalizedDefault : undefined,
+    geminiApiKey: clampString(src.geminiApiKey, 200),
+    geminiEnabled: typeof src.geminiEnabled === "boolean" ? src.geminiEnabled : undefined,
+    claudeApiKey: clampString(src.claudeApiKey, 200),
+    claudeEnabled: typeof src.claudeEnabled === "boolean" ? src.claudeEnabled : undefined,
+    openaiApiKey: clampString(src.openaiApiKey, 200),
+    openaiEnabled: typeof src.openaiEnabled === "boolean" ? src.openaiEnabled : undefined,
+  };
+}
+
+const CHAT_ROLES = new Set(["user", "assistant"]);
+const MAX_CHAT_HISTORY = 40;
+const MAX_CHAT_CONTEXT_ARTICLES = 30;
+const CHAT_PROVIDERS = new Set(["gemini", "claude", "openai"]);
+
+function sanitizeChatProvider(value) {
+  return CHAT_PROVIDERS.has(value) ? value : "gemini";
+}
+
+function sanitizeChatHistoryEntry(entry) {
+  const src = pickObject(entry);
+  const role = CHAT_ROLES.has(src.role) ? src.role : undefined;
+  const content = clampString(src.content, MAX_STRING);
+  if (!role || !content) return null;
+  return { role, content };
+}
+
+function sanitizeChatHistory(input) {
+  if (!Array.isArray(input)) return [];
+  return input
+    .slice(-MAX_CHAT_HISTORY)
+    .map(sanitizeChatHistoryEntry)
+    .filter(Boolean);
+}
+
+function sanitizeChatContextArticle(entry) {
+  const src = pickObject(entry);
+  const headline = clampString(src.headline, 400);
+  if (!headline) return null;
+  return {
+    headline,
+    summary: clampString(src.summary, 600),
+  };
+}
+
+function sanitizeChatContext(input) {
+  const src = pickObject(input);
+  return {
+    articles: Array.isArray(src.articles)
+      ? src.articles
+          .slice(0, MAX_CHAT_CONTEXT_ARTICLES)
+          .map(sanitizeChatContextArticle)
+          .filter(Boolean)
+      : [],
+  };
+}
+
+function sanitizeChatPayload(input) {
+  const src = pickObject(input);
+  return {
+    provider: sanitizeChatProvider(src.provider),
+    message: clampString(src.message, MAX_STRING) ?? "",
+    history: sanitizeChatHistory(src.history),
+    context: sanitizeChatContext(src.context),
   };
 }
 
@@ -301,6 +372,47 @@ function sanitizeTeachingItemArray(input) {
   return out;
 }
 
+const MAX_SCAN_FOLDERS = 100;
+
+// Personal folders are lightweight named collections; each field is clamped
+// individually so an oversized or malformed renderer payload can't bloat or
+// corrupt the preferences row (same convention as sanitizeTeachingItemArray).
+function sanitizeScanFolderArray(input) {
+  if (!Array.isArray(input)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const entry of input.slice(0, MAX_SCAN_FOLDERS)) {
+    if (!entry || typeof entry !== "object") continue;
+    const id = clampString(entry.id, 256);
+    const name = clampString(entry.name, 200);
+    if (!id || !name || seen.has(id)) continue;
+    seen.add(id);
+    out.push({
+      id,
+      name,
+      memberIds: clampStringArrayWithLimit(entry.memberIds, 256, 500),
+      createdAt: clampString(entry.createdAt, 40) ?? new Date().toISOString(),
+    });
+  }
+  return out;
+}
+
+const HTTP_URL_PATTERN = /^https?:\/\//i;
+
+function sanitizeAddSourceInput(input) {
+  const src = pickObject(input);
+  const url = clampString(src.url, 2048);
+  return {
+    url: url && HTTP_URL_PATTERN.test(url) ? url : undefined,
+    name: clampString(src.name, 200),
+    category: sanitizeMemoryDomain(src.category) ?? "General",
+  };
+}
+
+function sanitizeSourceId(value) {
+  return clampNumber(value, { min: 1, max: Number.MAX_SAFE_INTEGER });
+}
+
 function sanitizeScanStatePayload(input) {
   const src = pickObject(input);
   const rawRatings = pickObject(src.clusterRatings);
@@ -328,6 +440,7 @@ function sanitizeScanStatePayload(input) {
     teachingItems: sanitizeTeachingItemArray(src.teachingItems),
     digest: Boolean(src.digest),
     clusterRatings,
+    folders: sanitizeScanFolderArray(src.folders),
   };
 }
 
@@ -345,8 +458,13 @@ module.exports = {
   sanitizeUserFeedback,
   sanitizePreferences,
   sanitizeScanStatePayload,
+  sanitizeScanFolderArray,
   sanitizeClusterIdValue,
   sanitizeMemoryDomain,
   sanitizeMemorySnapshotPayload,
   sanitizeDomainCollapsePayload,
+  sanitizeChatPayload,
+  sanitizeAddSourceInput,
+  sanitizeSourceId,
+  MEMORY_DOMAINS,
 };

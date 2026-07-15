@@ -5,7 +5,7 @@ const http = require("node:http");
 const path = require("node:path");
 
 const ROOT = path.resolve(__dirname, "..");
-const HEALTH_URL = "http://127.0.0.1:3000/api/health";
+const HEALTH_URL = "http://127.0.0.1:3001/api/health";
 const STARTUP_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 500;
 const PROBE_TIMEOUT_MS = 15_000;
@@ -130,7 +130,7 @@ async function main() {
     const electron = spawnManaged("electron", electronBin, ["."], {
       env: {
         ...process.env,
-        ELECTRON_RENDERER_URL: "http://127.0.0.1:3000",
+        ELECTRON_RENDERER_URL: "http://127.0.0.1:3001",
       },
     });
 

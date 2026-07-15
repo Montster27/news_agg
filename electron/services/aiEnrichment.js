@@ -232,6 +232,14 @@ async function unloadModel() {
  * Modifies articles in-place and returns them.
  */
 async function enrichArticlesWithAI(articles) {
+  // Allow turning off local AI enrichment entirely (heuristic tags/summaries
+  // still apply). Useful for the first bulk load, where enriching hundreds of
+  // brand-new articles through a large local model can take a very long time.
+  if (process.env.AI_DISABLED === "1") {
+    console.log("[ai-enrich] AI_DISABLED=1, using heuristic enrichment only");
+    return articles;
+  }
+
   // Check availability once per session
   if (aiAvailable === null) {
     await checkAiAvailability();

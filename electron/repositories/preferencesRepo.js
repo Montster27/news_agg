@@ -3,6 +3,12 @@ const defaultPreferences = {
   notificationsEnabled: true,
   notificationImportanceThreshold: 5,
   personalizedDefault: false,
+  geminiApiKey: "",
+  geminiEnabled: true,
+  claudeApiKey: "",
+  claudeEnabled: false,
+  openaiApiKey: "",
+  openaiEnabled: false,
 };
 
 const defaultScanState = {
@@ -10,6 +16,7 @@ const defaultScanState = {
   teachingItems: [],
   digest: false,
   clusterRatings: {},
+  folders: [],
   updatedAt: null,
 };
 
@@ -68,6 +75,30 @@ function savePreferences(db, next) {
     sanitized.personalizedDefault = next.personalizedDefault;
   }
 
+  if (typeof next.geminiApiKey === "string") {
+    sanitized.geminiApiKey = next.geminiApiKey.trim().slice(0, 200);
+  }
+
+  if (typeof next.geminiEnabled === "boolean") {
+    sanitized.geminiEnabled = next.geminiEnabled;
+  }
+
+  if (typeof next.claudeApiKey === "string") {
+    sanitized.claudeApiKey = next.claudeApiKey.trim().slice(0, 200);
+  }
+
+  if (typeof next.claudeEnabled === "boolean") {
+    sanitized.claudeEnabled = next.claudeEnabled;
+  }
+
+  if (typeof next.openaiApiKey === "string") {
+    sanitized.openaiApiKey = next.openaiApiKey.trim().slice(0, 200);
+  }
+
+  if (typeof next.openaiEnabled === "boolean") {
+    sanitized.openaiEnabled = next.openaiEnabled;
+  }
+
   savePreference(db, "settings", sanitized);
   return sanitized;
 }
@@ -123,6 +154,7 @@ function saveScanState(db, next) {
       next?.clusterRatings && typeof next.clusterRatings === "object"
         ? next.clusterRatings
         : {},
+    folders: Array.isArray(next?.folders) ? next.folders : [],
     updatedAt: new Date().toISOString(),
   };
   savePreference(db, "scanState", state);

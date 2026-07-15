@@ -3,7 +3,21 @@ import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 
 const require = createRequire(import.meta.url);
-const { clampStringArray, sanitizeScanStatePayload } = require("./ipcValidate");
+const {
+  clampStringArray,
+  sanitizeScanStatePayload,
+  sanitizeScanFolderArray,
+  sanitizeChatPayload,
+  sanitizeAddSourceInput,
+  sanitizeSourceId,
+} = require("./ipcValidate");
+
+const wellFormedFolder = {
+  id: "folder_1",
+  name: "Deep dives",
+  memberIds: ["article-1", "article-2"],
+  createdAt: "2026-04-18T12:00:00.000Z",
+};
 
 const wellFormedTeachingItem = {
   id: "article-1",
@@ -40,6 +54,7 @@ describe("sanitizeScanStatePayload", () => {
           memberIds: ["article-1", "article-2"],
         },
       },
+      folders: [wellFormedFolder],
     };
 
     expect(sanitizeScanStatePayload(payload)).toEqual(payload);
@@ -52,6 +67,7 @@ describe("sanitizeScanStatePayload", () => {
         teachingItems: [],
         digest: false,
         clusterRatings: {},
+        folders: [],
       });
     }
   });
@@ -173,6 +189,199 @@ describe("sanitizeScanStatePayload", () => {
     const out = sanitizeScanStatePayload({ clusterRatings: ratings });
     expect(Object.keys(out.clusterRatings)).toHaveLength(500);
     expect(out.clusterRatings["key-0"].memberIds).toHaveLength(50);
+  });
+});
+
+describe("sanitizeScanFolderArray", () => {
+  it("passes well-formed folders through unchanged", () => {
+    expect(sanitizeScanFolderArray([wellFormedFolder])).toEqual([wellFormedFolder]);
+  });
+
+  it("returns an empty array for junk input", () => {
+    for (const input of [undefined, null, "junk", 42, {}]) {
+      expect(sanitizeScanFolderArray(input)).toEqual([]);
+    }
+  });
+
+  it("drops folders without an id or name and dedupes by id", () => {
+    const out = sanitizeScanFolderArray([
+      "junk",
+      null,
+      { id: "no-name" },
+      { name: "no id" },
+      wellFormedFolder,
+      { ...wellFormedFolder, name: "duplicate id is dropped" },
+    ]);
+
+    expect(out).toEqual([wellFormedFolder]);
+  });
+
+  it("coerces malformed folder fields to safe values", () => {
+    const out = sanitizeScanFolderArray([
+      {
+        id: "folder_2",
+        name: "Odd input",
+        memberIds: "nope",
+        createdAt: 12345,
+      },
+    ]);
+
+    expect(out[0].memberIds).toEqual([]);
+    expect(typeof out[0].createdAt).toBe("string");
+  });
+
+  it("caps folders at 100 entries and memberIds at 500", () => {
+    const many = Array.from({ length: 120 }, (_, i) => ({
+      id: `folder_${i}`,
+      name: `Folder ${i}`,
+      memberIds: Array.from({ length: 600 }, (_, j) => `m-${j}`),
+      createdAt: "2026-04-18T12:00:00.000Z",
+    }));
+    const out = sanitizeScanFolderArray(many);
+    expect(out).toHaveLength(100);
+    expect(out[0].memberIds).toHaveLength(500);
+  });
+});
+
+describe("sanitizeChatPayload", () => {
+  it("passes a well-formed payload through", () => {
+    const out = sanitizeChatPayload({
+      provider: "claude",
+      message: "Summarize the top story",
+      history: [
+        { role: "user", content: "Hi" },
+        { role: "assistant", content: "Hello, what would you like to know?" },
+      ],
+      context: {
+        articles: [{ headline: "AI chips advance", summary: "New packaging tech." }],
+      },
+    });
+
+    expect(out).toEqual({
+      provider: "claude",
+      message: "Summarize the top story",
+      history: [
+        { role: "user", content: "Hi" },
+        { role: "assistant", content: "Hello, what would you like to know?" },
+      ],
+      context: {
+        articles: [{ headline: "AI chips advance", summary: "New packaging tech." }],
+      },
+    });
+  });
+
+  it("returns safe defaults for junk input", () => {
+    for (const input of [undefined, null, "junk", 42, ["array"]]) {
+      expect(sanitizeChatPayload(input)).toEqual({
+        provider: "gemini",
+        message: "",
+        history: [],
+        context: { articles: [] },
+      });
+    }
+  });
+
+  it("passes through valid providers and defaults invalid ones to gemini", () => {
+    expect(sanitizeChatPayload({ provider: "openai", message: "hi" }).provider).toBe("openai");
+    expect(sanitizeChatPayload({ provider: "gemini", message: "hi" }).provider).toBe("gemini");
+    expect(sanitizeChatPayload({ provider: "claude", message: "hi" }).provider).toBe("claude");
+    expect(sanitizeChatPayload({ provider: "chatgpt", message: "hi" }).provider).toBe("gemini");
+    expect(sanitizeChatPayload({ provider: 42, message: "hi" }).provider).toBe("gemini");
+    expect(sanitizeChatPayload({ message: "hi" }).provider).toBe("gemini");
+  });
+
+  it("drops history entries with an invalid role or missing content", () => {
+    const out = sanitizeChatPayload({
+      message: "hi",
+      history: [
+        { role: "system", content: "not allowed" },
+        { role: "user", content: "" },
+        { role: "user" },
+        { role: "assistant", content: "kept" },
+      ],
+    });
+
+    expect(out.history).toEqual([{ role: "assistant", content: "kept" }]);
+  });
+
+  it("caps history at 40 entries, keeping the most recent", () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({
+      role: "user",
+      content: `msg-${i}`,
+    }));
+    const out = sanitizeChatPayload({ message: "hi", history: many });
+    expect(out.history).toHaveLength(40);
+    expect(out.history[0].content).toBe("msg-20");
+    expect(out.history[39].content).toBe("msg-59");
+  });
+
+  it("drops context articles without a headline and caps at 30 before filtering", () => {
+    // The 30-item cap is applied before the headline filter (same convention as
+    // sanitizeClusterSnapshotArray), so one leading invalid entry yields 29 kept.
+    const many = Array.from({ length: 40 }, (_, i) => ({ headline: `h-${i}` }));
+    const out = sanitizeChatPayload({
+      message: "hi",
+      context: { articles: [{ summary: "no headline" }, ...many] },
+    });
+    expect(out.context.articles).toHaveLength(29);
+    expect(out.context.articles[0]).toEqual({ headline: "h-0", summary: undefined });
+  });
+});
+
+describe("sanitizeAddSourceInput", () => {
+  it("passes a well-formed input through", () => {
+    const out = sanitizeAddSourceInput({
+      url: "https://techcrunch.com/feed/",
+      name: "TechCrunch",
+      category: "General",
+    });
+
+    expect(out).toEqual({
+      url: "https://techcrunch.com/feed/",
+      name: "TechCrunch",
+      category: "General",
+    });
+  });
+
+  it("defaults an invalid or missing category to General", () => {
+    expect(
+      sanitizeAddSourceInput({ url: "https://a.com/feed", name: "A", category: "NotADomain" }).category,
+    ).toBe("General");
+    expect(sanitizeAddSourceInput({ url: "https://a.com/feed", name: "A" }).category).toBe("General");
+  });
+
+  it("rejects a non-http(s) url", () => {
+    expect(sanitizeAddSourceInput({ url: "ftp://a.com/feed", name: "A" }).url).toBeUndefined();
+    expect(sanitizeAddSourceInput({ url: "not-a-url", name: "A" }).url).toBeUndefined();
+    expect(sanitizeAddSourceInput({ url: "", name: "A" }).url).toBeUndefined();
+    expect(sanitizeAddSourceInput({}).url).toBeUndefined();
+  });
+
+  it("clamps oversized name and url values", () => {
+    const out = sanitizeAddSourceInput({
+      url: `https://a.com/${"x".repeat(3000)}`,
+      name: "y".repeat(300),
+    });
+
+    expect(out.url?.length).toBeLessThanOrEqual(2048);
+    expect(out.name?.length).toBeLessThanOrEqual(200);
+  });
+});
+
+describe("sanitizeSourceId", () => {
+  it("passes a valid positive id through", () => {
+    expect(sanitizeSourceId(5)).toBe(5);
+    expect(sanitizeSourceId("5")).toBe(5);
+  });
+
+  it("clamps non-positive ids up to the minimum of 1", () => {
+    expect(sanitizeSourceId(0)).toBe(1);
+    expect(sanitizeSourceId(-1)).toBe(1);
+  });
+
+  it("returns undefined for non-numeric ids", () => {
+    expect(sanitizeSourceId("nope")).toBeUndefined();
+    expect(sanitizeSourceId(undefined)).toBeUndefined();
   });
 });
 

@@ -1,4 +1,26 @@
 const { app, BrowserWindow, Menu, dialog, ipcMain, Notification, shell, powerMonitor } = require("electron");
+
+// Give this app its own identity so its Electron userData directory (and the
+// local SQLite database inside it) stay separate from the original news_agg
+// app. Must run before any app.getPath("userData") call. See docker-compose.yml
+// for the matching Postgres isolation (host port 5433).
+app.setName("monty-s-news-app");
+
+// Load .env.local (then .env) for the main process. Next.js loads these for the
+// renderer automatically, but the Electron main process does not — so without
+// this the refresh/AI settings (OLLAMA_BASE_URL, AI_ARTICLE_MODEL, AI_DISABLED,
+// AI_TIMEOUT_MS, …) in .env.local are silently ignored by the desktop pipeline.
+if (typeof process.loadEnvFile === "function") {
+  const nodePath = require("node:path");
+  for (const file of [".env.local", ".env"]) {
+    try {
+      process.loadEnvFile(nodePath.join(__dirname, "..", file));
+    } catch {
+      // File absent or unreadable — fine, fall back to process defaults.
+    }
+  }
+}
+
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { initDb, getDbPath, getUserDataPath, closeDb } = require("./db");
@@ -25,6 +47,12 @@ const {
   saveUserFeedback,
 } = require("./repositories/preferencesRepo");
 const {
+  addCustomSource,
+  listCustomSources,
+  removeCustomSource,
+} = require("./repositories/sourcesRepo");
+const { sources: builtinSources } = require("./services/sources");
+const {
   getBrief,
   getInsights,
   getLongTermTrends,
@@ -40,8 +68,10 @@ const {
   snapshotClusters,
 } = require("./repositories/memoryRepo");
 const { createNotificationService } = require("./services/notificationService");
-const { createRefreshService } = require("./services/refreshService");
+const { createRefreshService, validateFeedUrl } = require("./services/refreshService");
 const { createScheduler } = require("./services/scheduler");
+const { createChatService } = require("./services/chatService");
+const { RSS_TOOL_NAME, LIST_TOOL_NAME } = require("./services/chatTools");
 const {
   createSnapshot,
   exportSnapshot,
@@ -64,9 +94,12 @@ const {
   sanitizeMemorySnapshotPayload,
   sanitizeDomainCollapsePayload,
   sanitizeScanStatePayload,
+  sanitizeChatPayload,
+  sanitizeAddSourceInput,
+  sanitizeSourceId,
 } = require("./ipcValidate");
 
-const DEV_SERVER_URL = process.env.ELECTRON_RENDERER_URL ?? "http://127.0.0.1:3000";
+const DEV_SERVER_URL = process.env.ELECTRON_RENDERER_URL ?? "http://127.0.0.1:3001";
 
 let mainWindow = null;
 let desktopDb = null;
@@ -74,6 +107,7 @@ let notificationService = null;
 let refreshService = null;
 let scheduler = null;
 let searchService = null;
+let chatService = null;
 
 function isLocalHttpUrl(value) {
   try {
@@ -208,6 +242,76 @@ function notifyRenderer(channel, payload) {
   }
 }
 
+// Executor for the chat's add_rss_feed tool. Runs in the main process (the
+// only place with both desktopDb and the sanitizers in scope) — validates
+// the URL is a real feed before ever touching the database.
+async function addRssFeedTool(rawInput) {
+  const { url, name, category } = sanitizeAddSourceInput(rawInput);
+
+  if (!url) {
+    return {
+      success: false,
+      error: "That doesn't look like a valid feed URL (must start with http:// or https://).",
+    };
+  }
+
+  const normalizedUrl = url.toLowerCase();
+
+  if (builtinSources.some((source) => source.url.toLowerCase() === normalizedUrl)) {
+    return { success: false, error: "This feed is already included by default." };
+  }
+
+  if (listCustomSources(desktopDb).some((source) => source.url.toLowerCase() === normalizedUrl)) {
+    return { success: false, error: "This feed is already added." };
+  }
+
+  const validation = await validateFeedUrl(url);
+  if (!validation.ok) {
+    return { success: false, error: `Could not add feed: ${validation.error}` };
+  }
+
+  let resolvedName = name || validation.title;
+  if (!resolvedName) {
+    try {
+      resolvedName = new URL(url).hostname;
+    } catch {
+      resolvedName = "New source";
+    }
+  }
+
+  const added = addCustomSource(desktopDb, { name: resolvedName, url, category });
+  if (!added.success) {
+    return { success: false, error: added.error };
+  }
+
+  notifyRenderer("desktop:sourcesChanged", listCustomSources(desktopDb));
+
+  return {
+    success: true,
+    message: `Added "${resolvedName}" under ${category} — it'll be included in the next refresh.`,
+  };
+}
+
+// Executor for the chat's list_rss_feeds tool — the read counterpart to
+// addRssFeedTool. Without this the model has no way to see what's already
+// configured (built-in or custom), so it can't answer "do we have X?" or
+// check for duplicates before adding.
+async function listRssFeedsTool(rawInput) {
+  const category = sanitizeMemoryDomain(rawInput?.category);
+  const all = [...builtinSources, ...listCustomSources(desktopDb)];
+  const filtered = category ? all.filter((source) => source.category === category) : all;
+
+  if (!filtered.length) {
+    return {
+      success: true,
+      message: `No feeds configured${category ? ` for ${category}` : ""}.`,
+    };
+  }
+
+  const lines = filtered.map((source) => `${source.name} (${source.category}): ${source.url}`);
+  return { success: true, message: lines.join("\n") };
+}
+
 function getPowerState() {
   if (typeof powerMonitor?.isOnBatteryPower !== "function") {
     return { source: "unknown", onBattery: false };
@@ -316,6 +420,20 @@ function createMenu() {
         },
         { type: "separator" },
         process.platform === "darwin" ? { role: "close" } : { role: "quit" },
+      ],
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        ...(process.platform === "darwin" ? [{ role: "pasteAndMatchStyle" }] : []),
+        { role: "delete" },
+        { role: "selectAll" },
       ],
     },
     {
@@ -591,6 +709,36 @@ ipcMain.handle("desktop:search:stats", () => {
   return searchService.stats();
 });
 
+ipcMain.handle("desktop:sources:list", () => {
+  return listCustomSources(desktopDb);
+});
+
+ipcMain.handle("desktop:sources:remove", (_event, id) => {
+  try {
+    const result = removeCustomSource(desktopDb, sanitizeSourceId(id));
+    if (result.success) {
+      notifyRenderer("desktop:sourcesChanged", listCustomSources(desktopDb));
+    }
+    return result;
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Could not remove source",
+    };
+  }
+});
+
+ipcMain.handle("desktop:chat:sendMessage", async (_event, payload) => {
+  try {
+    return await chatService.sendMessage(sanitizeChatPayload(payload));
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Unknown chat error",
+    };
+  }
+});
+
 ipcMain.handle("desktop:memory:getState", () => {
   try {
     return getMemoryState(desktopDb);
@@ -681,6 +829,18 @@ app.whenReady().then(async () => {
   scheduler = createScheduler({
     refreshService,
     getIntervalMinutes: () => getPreferences(desktopDb).refreshIntervalMinutes,
+  });
+  chatService = createChatService({
+    getApiKey: (provider) => {
+      const preferences = getPreferences(desktopDb);
+      if (provider === "claude") return preferences.claudeApiKey;
+      if (provider === "openai") return preferences.openaiApiKey;
+      return preferences.geminiApiKey;
+    },
+    toolExecutors: {
+      [RSS_TOOL_NAME]: addRssFeedTool,
+      [LIST_TOOL_NAME]: listRssFeedsTool,
+    },
   });
   createMenu();
   await createWindow();

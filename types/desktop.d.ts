@@ -60,11 +60,19 @@ declare global {
     memoryBreaks?: number;
   };
 
+  type ChatProvider = "claude" | "gemini" | "openai";
+
   type DesktopPreferences = {
     refreshIntervalMinutes: number;
     notificationsEnabled: boolean;
     notificationImportanceThreshold: number;
     personalizedDefault: boolean;
+    geminiApiKey?: string;
+    geminiEnabled?: boolean;
+    claudeApiKey?: string;
+    claudeEnabled?: boolean;
+    openaiApiKey?: string;
+    openaiEnabled?: boolean;
     appDataPath?: string;
     dbPath?: string;
     lastRefreshError?: string | null;
@@ -76,11 +84,29 @@ declare global {
     };
   };
 
+  type DesktopCustomSource = {
+    id: number;
+    name: string;
+    url: string;
+    category: string;
+    createdAt: string;
+  };
+
+  type DesktopChatMessage = {
+    role: "user" | "assistant";
+    content: string;
+  };
+
+  type DesktopChatContext = {
+    articles?: Array<{ headline: string; summary?: string }>;
+  };
+
   type DesktopScanState = {
     teachingIds: string[];
     teachingItems?: import("@/lib/teachingPack").TeachingItem[];
     digest: boolean;
     clusterRatings: import("@/lib/clusterRatings").ClusterRatingStore;
+    folders?: import("@/lib/scanFolders").ScanFolder[];
     updatedAt?: string | null;
   };
 
@@ -316,6 +342,23 @@ declare global {
           clusterId: string;
           limit?: number;
         }) => Promise<DesktopMemoryHistoryEntry[]>;
+      };
+      chat?: {
+        sendMessage: (payload: {
+          provider: ChatProvider;
+          message: string;
+          history?: DesktopChatMessage[];
+          context?: DesktopChatContext;
+        }) => Promise<{
+          success: boolean;
+          message?: DesktopChatMessage;
+          error?: string;
+        }>;
+      };
+      sources: {
+        list: () => Promise<DesktopCustomSource[]>;
+        remove: (id: number) => Promise<{ success: boolean; error?: string }>;
+        onChanged: (callback: (sources: DesktopCustomSource[]) => void) => () => void;
       };
     };
   }

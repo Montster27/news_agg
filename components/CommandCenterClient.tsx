@@ -16,6 +16,7 @@ import {
 } from "@/lib/feedback";
 import { updateAffinitiesFromFeedback } from "@/lib/affinity";
 import { AppShell } from "@/components/AppShell";
+import { useSetChatContext } from "@/components/ChatContext";
 import { DesktopControls } from "@/components/DesktopControls";
 import { ArticleFeed } from "@/components/ArticleFeed";
 import { DomainBreadthView } from "@/components/DomainBreadthView";
@@ -468,7 +469,7 @@ export function CommandCenterClient({
       setPersonalizedView(preferences.personalizedDefault);
       setRefreshStatus(
         preferences.lastRefreshError
-          ? "Cached data"
+          ? "Refresh failed — see Settings for details"
           : lastRefresh
             ? "Local cache"
             : "Local cache empty",
@@ -1225,6 +1226,17 @@ export function CommandCenterClient({
     void window.desktop?.data.clearLearningProfile();
   };
 
+  const chatContext = useMemo<DesktopChatContext>(
+    () => ({
+      articles: articles.slice(0, 30).map((article) => ({
+        headline: article.headline,
+        summary: article.summary,
+      })),
+    }),
+    [articles],
+  );
+  useSetChatContext(chatContext);
+
   const rightRail = articles.length ? (
     <div className="space-y-4">
       <WeeklyShifts
@@ -1315,10 +1327,9 @@ export function CommandCenterClient({
                   });
                 }
                 if (preferences.lastRefreshError) {
-                  setRefreshStatus("Cached data");
+                  setRefreshStatus("Refresh failed — see Settings for details");
                 }
               }}
-              onClearLearning={handleClearLearning}
             />
           </div>
         </header>
