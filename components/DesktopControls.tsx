@@ -334,6 +334,11 @@ export function DesktopControls({
             />
             <span>Personalized default</span>
           </label>
+          <label className="flex items-start gap-2 sm:col-span-2">
+            <input type="checkbox" checked={preferences.enrichmentEnabled ?? false}
+              onChange={(event) => void savePreference({ enrichmentEnabled: event.target.checked })} />
+            <span>Enrich new articles with full text and AI (uses more resources)</span>
+          </label>
           <button
             type="button"
             onClick={handleClearLearning}

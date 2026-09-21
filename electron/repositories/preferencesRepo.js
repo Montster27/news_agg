@@ -1,5 +1,6 @@
 const defaultPreferences = {
-  refreshIntervalMinutes: 30,
+  refreshIntervalMinutes: 60,
+  enrichmentEnabled: false,
   notificationsEnabled: true,
   notificationImportanceThreshold: 5,
   personalizedDefault: false,
@@ -66,6 +67,10 @@ function savePreferences(db, next) {
 
   if (typeof next.personalizedDefault === "boolean") {
     sanitized.personalizedDefault = next.personalizedDefault;
+  }
+
+  if (typeof next.enrichmentEnabled === "boolean") {
+    sanitized.enrichmentEnabled = next.enrichmentEnabled;
   }
 
   savePreference(db, "settings", sanitized);

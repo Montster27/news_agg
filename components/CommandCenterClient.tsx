@@ -1255,7 +1255,7 @@ export function CommandCenterClient({
   ) : null;
 
   return (
-    <AppShell aside={rightRail} activePath="/">
+    <AppShell aside={rightRail} activePath="/research">
       <div className="space-y-6">
         <header className="surface-card p-5 sm:p-6">
           <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">

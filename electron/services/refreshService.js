@@ -476,9 +476,6 @@ function createRefreshService({
         return nextResult;
       }
 
-      // Reset AI status so it re-checks availability each cycle.
-      resetAiAvailability();
-
       const preferences = getPreferences(db);
       const settled = await (fetchAllFeedsOverride ?? fetchAllFeeds)(preferences, {
         resourceMonitor,
@@ -521,7 +518,7 @@ function createRefreshService({
       const toExtract = sortedForExtraction.slice(0, extractionLimit);
       const skipExtract = sortedForExtraction.slice(extractionLimit);
 
-      if (toExtract.length && fullTextEnricher) {
+      if (preferences.enrichmentEnabled && toExtract.length && fullTextEnricher) {
         try {
           const extracted = await fullTextEnricher(toExtract);
           articles = [...extracted, ...skipExtract];
@@ -533,8 +530,9 @@ function createRefreshService({
 
       // AI enrichment for domain, tags, importance, and summary. Skipped
       // entirely when nothing is new so a no-op refresh never loads the model.
-      if (articles.length && aiEnricher) {
+      if (preferences.enrichmentEnabled && articles.length && aiEnricher) {
         try {
+          resetAiAvailability();
           articles = await aiEnricher(articles);
           console.log(`[refresh] AI enrichment completed`);
         } catch (aiError) {
@@ -544,6 +542,16 @@ function createRefreshService({
 
       // Save and generate patterns/briefs.
       const result = upsertArticles(db, articles);
+      // A no-change poll should not rebuild every derived snapshot.
+      if (!articles.length) {
+        const refreshedAt = new Date().toISOString();
+        setLastRefresh(db, refreshedAt);
+        setLastRefreshError(db, null);
+        return complete({ success: true, inserted: 0, updated: 0, incoming: fetched.length,
+          fresh: 0, skippedKnown, fetchedAt: refreshedAt,
+          warning: errors.length ? errors.slice(0, 3).join("; ") : undefined });
+      }
+
       const latestArticles = getArticles(db, { limit: 500 });
       const patterns = getPatterns(db, { limit: 500 });
       const week = formatWeek(new Date());

@@ -62,6 +62,7 @@ declare global {
 
   type DesktopPreferences = {
     refreshIntervalMinutes: number;
+    enrichmentEnabled: boolean;
     notificationsEnabled: boolean;
     notificationImportanceThreshold: number;
     personalizedDefault: boolean;

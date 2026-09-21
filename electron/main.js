@@ -681,6 +681,7 @@ app.whenReady().then(async () => {
   scheduler = createScheduler({
     refreshService,
     getIntervalMinutes: () => getPreferences(desktopDb).refreshIntervalMinutes,
+    getLastRefresh: () => getLastRefresh(desktopDb),
   });
   createMenu();
   await createWindow();

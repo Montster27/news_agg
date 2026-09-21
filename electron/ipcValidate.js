@@ -239,6 +239,9 @@ function sanitizePreferences(input) {
     refreshIntervalMinutes: clampNumber(src.refreshIntervalMinutes, { min: 1, max: 10080 }),
     importanceThreshold: clampNumber(src.importanceThreshold, { min: 1, max: 5 }),
     personalizedThreshold: clampNumber(src.personalizedThreshold, { min: 0, max: 10 }),
+    enrichmentEnabled: typeof src.enrichmentEnabled === "boolean" ? src.enrichmentEnabled : undefined,
+    personalizedDefault: typeof src.personalizedDefault === "boolean" ? src.personalizedDefault : undefined,
+    notificationImportanceThreshold: clampNumber(src.notificationImportanceThreshold, { min: 1, max: 5 }),
     notificationsEnabled:
       typeof src.notificationsEnabled === "boolean" ? src.notificationsEnabled : undefined,
     sources: clampStringArray(src.sources, 500),

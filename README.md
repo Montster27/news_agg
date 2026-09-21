@@ -2,6 +2,17 @@
 
 Local-first tech intelligence dashboard built with Next.js.
 
+## Everyday reading
+
+The home page opens a compact reading list of six stories, balancing broad fields before showing a second story from the same field. Interests, importance, recency and publisher variety help choose the picks. Duplicate links and headlines are removed. Older coverage remains available after current reporting and is labeled explicitly. Topic activity reflects the saved collection, not a claim about the entire news landscape.
+
+- Follow topics in **Your interests & settings**. These preferences are saved on this device.
+- Use topic filters and search within the 200 most recent saved articles, or show six more stories at a time.
+- Open **Research** for the previous command center, deeper trends, search and export tools.
+- Desktop reads cached articles first. The web home reads a configured database and displays an honest empty state when there are no saved articles.
+
+Desktop refreshes now use feed summaries by default. Full-text extraction and AI enrichment are opt-in in Settings and apply to newly discovered articles. The default interval is 60 minutes; existing saved intervals are preserved. Startup and resume skip refresh when data is still fresh, and unchanged feeds no longer regenerate derived snapshots. Development mode still runs a Next.js development server and Electron, so these changes do not eliminate their baseline resource cost.
+
 ## Electron Phase 1
 
 Phase 1 adds a thin Electron desktop shell around the existing app without rebuilding the React/Next.js UI.

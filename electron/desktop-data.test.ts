@@ -30,6 +30,7 @@ const {
   getUserFeedback,
   saveImportanceFeedback,
   saveScanState,
+  savePreferences,
   saveUserFeedback,
 } = require("./repositories/preferencesRepo");
 const {
@@ -479,8 +480,26 @@ describe("Electron Phase 2 local data layer", () => {
     expect(stored.skipReason).toBe("idle");
   });
 
+  it("refreshes feed summaries without loading AI or extracting pages by default", async () => {
+    const db = createDb();
+    let expensiveCalls = 0;
+    const enrich = async (articles: any[]) => { expensiveCalls++; return articles; };
+    const service = createRefreshService({
+      db,
+      resourceMonitor: unconstrainedResourceMonitor(),
+      fullTextEnricher: enrich,
+      aiEnricher: enrich,
+      resetAiAvailability: () => { expensiveCalls++; },
+      fetchAllFeeds: async () => [{ articles: [sampleArticle()], error: null }],
+    });
+    expect((await service.runRefresh({ manual: true })).inserted).toBe(1);
+    expect(expensiveCalls).toBe(0);
+    expect(getArticles(db, { limit: 10 })[0].summary).toBe(sampleArticle().summary);
+  });
+
   it("processes only never-seen articles on subsequent refreshes", async () => {
     const db = createDb();
+    savePreferences(db, { enrichmentEnabled: true });
     const feedResults = [
       {
         articles: [

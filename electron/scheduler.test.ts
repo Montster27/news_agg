@@ -1,0 +1,31 @@
+import { createRequire } from "node:module";
+import { afterEach, expect, it, vi } from "vitest";
+const require = createRequire(import.meta.url);
+const { createScheduler } = require("./services/scheduler");
+afterEach(() => vi.useRealTimers());
+it("skips launch and wake refreshes while the saved data is still fresh", async () => {
+  vi.useFakeTimers();
+  const runRefresh = vi.fn().mockResolvedValue({ success: true });
+  const last = new Date().toISOString();
+  const scheduler = createScheduler({ refreshService: { runRefresh }, getIntervalMinutes: () => 60, getLastRefresh: () => last });
+  scheduler.start();
+  scheduler.runAfterDelay();
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(runRefresh).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(60 * 60_000);
+  expect(runRefresh).toHaveBeenCalledOnce();
+  scheduler.stop();
+});
+it("cancels delayed work on stop and coalesces repeated wake events", async () => {
+  vi.useFakeTimers();
+  const runRefresh = vi.fn().mockResolvedValue({ success: true });
+  const scheduler = createScheduler({ refreshService: { runRefresh } });
+  scheduler.runAfterDelay();
+  scheduler.runAfterDelay();
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(runRefresh).toHaveBeenCalledOnce();
+  scheduler.runAfterDelay();
+  scheduler.stop();
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(runRefresh).toHaveBeenCalledOnce();
+});
